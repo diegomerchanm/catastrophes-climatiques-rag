@@ -1,0 +1,7 @@
+.env
+faiss_store/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+venv/
+*.egg-info/

@@ -1,0 +1,12 @@
+langchain
+langchain-community
+langchain-groq
+faiss-cpu
+sentence-transformers
+chainlit
+pypdf
+tiktoken
+duckduckgo-search
+requests
+python-dotenv
+langgraph
