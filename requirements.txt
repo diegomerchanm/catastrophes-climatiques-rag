@@ -10,3 +10,4 @@ duckduckgo-search
 requests
 python-dotenv
 langgraph
+langchain-text-splitters
