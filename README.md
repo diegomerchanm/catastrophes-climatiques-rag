@@ -31,8 +31,14 @@ Le projet est organisé autour de 4 composants principaux :
 
 ## Corpus
 
-10 rapports scientifiques sur les catastrophes climatiques :
+10 rapports scientifiques sur les catastrophes climatiques.
 
+**Télécharger les PDFs ici (Google Drive) :**
+https://drive.google.com/drive/folders/1g7JAdrbp1CoioPm7MR4cjQnT_A0hJjYo?usp=drive_link
+
+Placer tous les fichiers dans `data/raw/` après téléchargement.
+
+Liste des fichiers :
 - GIEC AR6 — Synthesis Report Summary for Policymakers
 - GIEC AR6 — Working Group II Summary for Policymakers (impacts, adaptation)
 - GIEC AR6 — Working Group III Summary for Policymakers (atténuation)
