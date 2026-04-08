@@ -1,7 +1,7 @@
 # Création et persistance du vector store FAISS avec embeddings HuggingFace
 
 import os
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 DOSSIER_FAISS = "faiss_store"
