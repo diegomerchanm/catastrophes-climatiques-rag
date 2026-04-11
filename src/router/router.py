@@ -28,10 +28,17 @@ def get_llm():
 CLASSIFIER_PROMPT = ChatPromptTemplate.from_messages([
     ("system", """Tu es un routeur de questions. Analyse la question et réponds UNIQUEMENT par un seul mot :
 - "rag" si la question porte sur les catastrophes climatiques, le réchauffement, les événements météo extrêmes, ou tout sujet scientifique environnemental
-- "agent" si la question demande la météo actuelle, une recherche web, ou un calcul mathématique
+- "agent" si la question demande la météo actuelle, une recherche web récente, ou un calcul mathématique précis
 - "chat" pour toute autre conversation générale (salutations, opinions, questions hors-sujet)
 
-Ne réponds que par : rag, agent, ou chat"""),
+Exemples :
+- "Bonjour" → chat
+- "Quelle est la météo à Paris ?" → agent
+- "Calcule 3+7" → agent
+- "Que dit le GIEC sur les inondations ?" → rag
+- "Quelles catastrophes en 2023 ?" → rag
+
+Ne réponds que par un seul mot : rag, agent, ou chat"""),
     ("human", "{question}")
 ])
 
@@ -40,6 +47,7 @@ def classify_question(state: RouterState) -> RouterState:
     chain = CLASSIFIER_PROMPT | llm
     result = chain.invoke({"question": state["question"]})
     route = result.content.strip().lower()
+    # Sécurité : si le modèle répond autre chose on fallback sur chat
     if route not in ["rag", "agent", "chat"]:
         route = "chat"
     return {**state, "route": route}
@@ -53,7 +61,7 @@ RAG_PROMPT = ChatPromptTemplate.from_messages([
     ("system", """Tu es un assistant expert en catastrophes climatiques.
 Réponds à la question en utilisant UNIQUEMENT le contexte fourni.
 Cite tes sources avec [Source: nom_fichier, page X].
-Si le contexte est insuffisant, dis-le clairement.
+Si le contexte est insuffisant, dis-le clairement en expliquant ce que tu as trouvé quand même.
 
 Contexte :
 {context}"""),
@@ -66,8 +74,13 @@ def rag_node(state: RouterState) -> RouterState:
         from src.rag.retriever import creer_retriever, interroger_rag
 
         vector_store = charger_vector_store()
+
         if vector_store is None:
-            return {**state, "answer": "Le vector store n'est pas disponible. Lancez d'abord embeddings.py.", "sources": []}
+            return {
+                **state,
+                "answer": "⚠️ Le vector store n'est pas disponible. Lancez d'abord : python -m src.rag.embeddings",
+                "sources": []
+            }
 
         retriever = creer_retriever(vector_store)
         resultat = interroger_rag(retriever, state["question"])
@@ -75,9 +88,10 @@ def rag_node(state: RouterState) -> RouterState:
         contexte = resultat["contexte"]
         documents = resultat["documents"]
 
+        # Nettoyer les chemins de sources — afficher uniquement le nom du fichier
         sources = []
         for doc in documents:
-            source = doc.metadata.get("source", "inconnu")
+            source = os.path.basename(doc.metadata.get("source", "inconnu"))
             page = doc.metadata.get("page", "?")
             sources.append(f"{source} (page {page})")
 
@@ -87,10 +101,15 @@ def rag_node(state: RouterState) -> RouterState:
             "context": contexte,
             "question": state["question"]
         })
+
         return {**state, "answer": result.content, "sources": sources}
 
     except Exception as e:
-        return {**state, "answer": f"Erreur RAG : {str(e)}", "sources": []}
+        return {
+            **state,
+            "answer": f"⚠️ Erreur RAG : {str(e)}",
+            "sources": []
+        }
 
 # ── Node 3 : Agent ────────────────────────────────────────────────────────────
 
@@ -99,13 +118,15 @@ def agent_node(state: RouterState) -> RouterState:
         from src.agents.agent import run_agent
         answer = run_agent(state["question"], state.get("history", []))
     except Exception as e:
-        answer = f"[Agent non disponible] {str(e)}"
+        answer = f"⚠️ Agent non disponible : {str(e)}"
     return {**state, "answer": answer, "sources": []}
 
 # ── Node 4 : Chat direct ──────────────────────────────────────────────────────
 
 CHAT_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", "Tu es un assistant conversationnel sympathique et concis."),
+    ("system", """Tu es un assistant conversationnel sympathique et concis.
+Tu te souviens de ce qui a été dit dans la conversation.
+Réponds toujours en français."""),
     ("placeholder", "{history}"),
     ("human", "{question}")
 ])
