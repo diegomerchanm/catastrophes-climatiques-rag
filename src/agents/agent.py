@@ -18,7 +18,7 @@ from langgraph.prebuilt import ToolNode
 from typing_extensions import TypedDict
 
 from src.agents.tools import ALL_TOOLS
-from src.config import TOKEN_TRACKING, TokenCounter, get_fallback_llm, get_llm
+from src.config import TOKEN_TRACKING, TokenCounter, get_fallback_llm, get_llm, get_ollama_fallback
 from src.prompts.agent_prompts import CURRENT_VERSION, get_prompt
 
 load_dotenv()
@@ -53,8 +53,12 @@ def _get_llm_with_tools():
             llm = get_llm("orchestrator")
             logger.info("LLM orchestrateur initialisé (prompt %s)", PROMPT_VERSION)
         except Exception as exc:
-            logger.warning("Fallback LLM activé : %s", exc)
-            llm = get_fallback_llm()
+            logger.warning("Fallback Haiku activé : %s", exc)
+            try:
+                llm = get_fallback_llm()
+            except Exception as exc2:
+                logger.warning("Fallback Ollama activé : %s", exc2)
+                llm = get_ollama_fallback()
         _llm_with_tools = llm.bind_tools(ALL_TOOLS)
     return _llm_with_tools
 
@@ -134,6 +138,7 @@ def get_agent():
 def run_agent(question: str, chat_history: list[BaseMessage] | None = None) -> str:
     """
     Exécute l'agent sur une question et retourne la réponse finale.
+    Tracke la prédiction dans MLflow si disponible.
 
     Args:
         question:     La question de l'utilisateur.
@@ -142,19 +147,70 @@ def run_agent(question: str, chat_history: list[BaseMessage] | None = None) -> s
     Returns:
         Réponse textuelle finale de l'agent.
     """
+    import time
+
     logger.info("Question reçue : %s", question[:100])
     agent = get_agent()
     messages = (chat_history or []) + [HumanMessage(content=question)]
 
+    t0 = time.time()
     result = agent.invoke({"messages": messages})
+    duree = round(time.time() - t0, 2)
 
+    answer = "L'agent n'a pas pu produire de réponse."
     for msg in reversed(result["messages"]):
         if isinstance(msg, AIMessage) and not msg.tool_calls:
-            logger.info("Réponse générée (%d caractères)", len(msg.content))
-            return msg.content
+            answer = msg.content
+            break
 
-    logger.warning("L'agent n'a pas produit de réponse finale")
-    return "L'agent n'a pas pu produire de réponse."
+    # Détecter les outils appelés
+    outils_appeles = []
+    for msg in result["messages"]:
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            for tc in msg.tool_calls:
+                outils_appeles.append(tc["name"])
+
+    logger.info(
+        "Réponse générée (%d car, %d outils, %.2fs)",
+        len(answer), len(outils_appeles), duree,
+    )
+
+    # Tracking MLflow
+    _log_mlflow(question, answer, outils_appeles, duree)
+
+    return answer
+
+
+def _log_mlflow(question: str, answer: str, outils: list, duree: float) -> None:
+    """Tracke une prédiction dans MLflow si disponible."""
+    try:
+        import mlflow
+
+        mlflow.set_experiment("rag-catastrophes-climatiques")
+
+        with mlflow.start_run(run_name=question[:50], nested=True):
+            # Paramètres
+            mlflow.log_param("prompt_version", PROMPT_VERSION)
+            mlflow.log_param("question", question[:250])
+            mlflow.log_param("nb_outils_appeles", len(outils))
+            mlflow.log_param("outils", ", ".join(outils) if outils else "aucun")
+            mlflow.log_param("orchestrator_model", "sonnet")
+
+            # Métriques
+            mlflow.log_metric("duree_s", duree)
+            mlflow.log_metric("longueur_reponse", len(answer))
+            mlflow.log_metric("nb_outils", len(outils))
+
+            tokens = token_counter.summary()
+            mlflow.log_metric("total_tokens", tokens["total_tokens"])
+            mlflow.log_metric("estimated_cost_usd", tokens.get("estimated_cost_usd", 0))
+
+            logger.debug("MLflow run enregistré pour : %s", question[:50])
+
+    except ImportError:
+        logger.debug("MLflow non installé, tracking désactivé")
+    except Exception as exc:
+        logger.debug("MLflow tracking échoué : %s", exc)
 
 
 def get_token_summary() -> dict:

@@ -185,9 +185,30 @@ def get_llm(agent_type: str) -> ChatAnthropic:
 
 
 def get_fallback_llm() -> ChatAnthropic:
-    """LLM de secours en cas d'échec du modèle principal."""
+    """LLM de secours Anthropic (Haiku) en cas d'échec du modèle principal."""
     return ChatAnthropic(
         model=FALLBACK_MODEL,
         temperature=0.2,
         max_tokens=1024,
     )
+
+
+def get_ollama_fallback():
+    """
+    LLM de secours local via Ollama (open source, gratuit, hors ligne).
+    Nécessite Ollama installé + modèle téléchargé : ollama pull mistral
+    Utilisé quand l'API Anthropic est indisponible.
+    """
+    try:
+        from langchain_community.llms import Ollama
+
+        return Ollama(
+            model="mistral",
+            temperature=0.2,
+            num_predict=1024,
+        )
+    except ImportError:
+        raise EnvironmentError(
+            "Ollama non disponible. Installez langchain-community et Ollama : "
+            "pip install langchain-community && curl -fsSL https://ollama.com/install.sh | sh && ollama pull mistral"
+        )
