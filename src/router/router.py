@@ -1,9 +1,16 @@
-import os
+"""
+P3 — src/router/router.py
+Router conditionnel LangGraph — 3 branches : rag / agent / chat
+Utilise get_llm() de config.py (migration Groq → Claude)
+"""
+import logging
 from typing import TypedDict
-from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
+from src.config import get_llm
+
+logger = logging.getLogger(__name__)
 
 # ── State ─────────────────────────────────────────────────────────────────────
 
@@ -13,15 +20,6 @@ class RouterState(TypedDict):
     answer: str
     sources: list
     history: list
-
-# ── LLM ───────────────────────────────────────────────────────────────────────
-
-def get_llm():
-    return ChatGroq(
-        model="llama-3.3-70b-versatile",
-        temperature=0,
-        api_key=os.getenv("GROQ_API_KEY")
-    )
 
 # ── Node 1 : Classifier ───────────────────────────────────────────────────────
 
@@ -43,13 +41,13 @@ Ne réponds que par un seul mot : rag, agent, ou chat"""),
 ])
 
 def classify_question(state: RouterState) -> RouterState:
-    llm = get_llm()
+    llm = get_llm("orchestrator")
     chain = CLASSIFIER_PROMPT | llm
     result = chain.invoke({"question": state["question"]})
     route = result.content.strip().lower()
-    # Sécurité : si le modèle répond autre chose on fallback sur chat
     if route not in ["rag", "agent", "chat"]:
         route = "chat"
+    logger.info("Question routée vers : %s", route)
     return {**state, "route": route}
 
 def route_decision(state: RouterState) -> str:
@@ -70,11 +68,11 @@ Contexte :
 
 def rag_node(state: RouterState) -> RouterState:
     try:
+        import os
         from src.rag.embeddings import charger_vector_store
         from src.rag.retriever import creer_retriever, interroger_rag
 
         vector_store = charger_vector_store()
-
         if vector_store is None:
             return {
                 **state,
@@ -88,23 +86,25 @@ def rag_node(state: RouterState) -> RouterState:
         contexte = resultat["contexte"]
         documents = resultat["documents"]
 
-        # Nettoyer les chemins de sources — afficher uniquement le nom du fichier
+        # Nettoyer les chemins — afficher uniquement le nom du fichier
         sources = []
         for doc in documents:
             source = os.path.basename(doc.metadata.get("source", "inconnu"))
             page = doc.metadata.get("page", "?")
             sources.append(f"{source} (page {page})")
 
-        llm = get_llm()
+        llm = get_llm("rag")
         chain = RAG_PROMPT | llm
         result = chain.invoke({
             "context": contexte,
             "question": state["question"]
         })
 
+        logger.info("RAG : %d sources trouvées", len(sources))
         return {**state, "answer": result.content, "sources": sources}
 
     except Exception as e:
+        logger.error("Erreur RAG : %s", str(e))
         return {
             **state,
             "answer": f"⚠️ Erreur RAG : {str(e)}",
@@ -117,7 +117,9 @@ def agent_node(state: RouterState) -> RouterState:
     try:
         from src.agents.agent import run_agent
         answer = run_agent(state["question"], state.get("history", []))
+        logger.info("Agent : réponse générée")
     except Exception as e:
+        logger.error("Erreur Agent : %s", str(e))
         answer = f"⚠️ Agent non disponible : {str(e)}"
     return {**state, "answer": answer, "sources": []}
 
@@ -132,12 +134,13 @@ Réponds toujours en français."""),
 ])
 
 def chat_node(state: RouterState) -> RouterState:
-    llm = get_llm()
+    llm = get_llm("chat")
     chain = CHAT_PROMPT | llm
     result = chain.invoke({
         "question": state["question"],
         "history": state.get("history", [])
     })
+    logger.info("Chat : réponse directe générée")
     return {**state, "answer": result.content, "sources": []}
 
 # ── Compilation du graph ──────────────────────────────────────────────────────
