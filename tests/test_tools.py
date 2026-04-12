@@ -76,3 +76,35 @@ def test_wmo_codes():
     assert 0 in _WMO_CODES
     assert 95 in _WMO_CODES
     assert "dégagé" in _WMO_CODES[0].lower() or "Ciel" in _WMO_CODES[0]
+
+
+def test_send_email_no_config():
+    """Vérifie que send_email gère l'absence de configuration."""
+    import os
+    from src.agents.tools import send_email
+
+    old_addr = os.environ.pop("EMAIL_ADDRESS", None)
+    old_pwd = os.environ.pop("EMAIL_APP_PASSWORD", None)
+    try:
+        result = send_email.invoke({
+            "destinataire": "test@test.com",
+            "sujet": "Test",
+            "contenu": "Contenu test",
+        })
+        assert "non configuré" in result.lower() or "ajoutez" in result.lower()
+    finally:
+        if old_addr:
+            os.environ["EMAIL_ADDRESS"] = old_addr
+        if old_pwd:
+            os.environ["EMAIL_APP_PASSWORD"] = old_pwd
+
+
+def test_prompt_versions():
+    """Vérifie que les prompts versionnés existent."""
+    from src.prompts.agent_prompts import PROMPTS, get_prompt, list_versions
+
+    assert "v1.0" in PROMPTS
+    assert "v2.0" in PROMPTS
+    assert len(list_versions()) >= 2
+    assert "search_corpus" in get_prompt("v1.0")
+    assert "send_email" in get_prompt("v1.0")

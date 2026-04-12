@@ -75,15 +75,32 @@ def test_src_structure():
     assert (ROOT / "src" / "agents" / "tools.py").exists()
     assert (ROOT / "src" / "agents" / "agent.py").exists()
     assert (ROOT / "src" / "memory" / "memory.py").exists()
+    assert (ROOT / "src" / "prompts" / "agent_prompts.py").exists()
+
+
+def test_mcp_server_exists():
+    """Vérifie que le serveur MCP existe."""
+    assert (ROOT / "mcp_server.py").exists()
+
+
+def test_scheduled_report_exists():
+    """Vérifie que le script de rapport hebdomadaire existe."""
+    assert (ROOT / "scheduled_report.py").exists()
 
 
 def test_github_workflows():
-    """Vérifie que les workflows CI/CD existent."""
+    """Vérifie que les 3 workflows CI/CD existent."""
     workflows = ROOT / ".github" / "workflows"
     assert workflows.exists()
     files = [f.name for f in workflows.iterdir()]
     assert "github-docker-cicd.yaml" in files
     assert "azure.yml" in files
+    assert "weekly-report.yml" in files
+
+
+def test_notebook_template_exists():
+    """Vérifie que le template notebook existe."""
+    assert (ROOT / "notebooks" / "TEMPLATE_NBx.ipynb").exists()
 
 
 def test_tests_directory():
