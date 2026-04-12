@@ -2,10 +2,10 @@
 
 
 def test_all_tools_list():
-    """Vérifie que ALL_TOOLS contient les 6 outils."""
+    """Vérifie que ALL_TOOLS contient les 7 outils."""
     from src.agents.tools import ALL_TOOLS
 
-    assert len(ALL_TOOLS) == 6
+    assert len(ALL_TOOLS) == 7
 
 
 def test_tool_names():
@@ -20,6 +20,7 @@ def test_tool_names():
         "web_search",
         "calculator",
         "search_corpus",
+        "send_email",
     ]
     for nom in attendus:
         assert nom in noms, f"Outil '{nom}' manquant dans ALL_TOOLS"

@@ -16,6 +16,7 @@ from src.agents.tools import (
     get_historical_weather,
     get_weather,
     search_corpus,
+    send_email,
     web_search,
 )
 
@@ -65,6 +66,16 @@ def calculatrice(expression: str) -> str:
 def recherche_corpus(question: str) -> str:
     """Recherche hybride (BM25 + Dense) dans le corpus climatique (GIEC, Copernicus, EM-DAT)."""
     return search_corpus.invoke({"question": question})
+
+
+@mcp.tool()
+def envoyer_email(destinataire: str, sujet: str, contenu: str) -> str:
+    """Envoie un email d'alerte ou de rapport climatique."""
+    return send_email.invoke({
+        "destinataire": destinataire,
+        "sujet": sujet,
+        "contenu": contenu,
+    })
 
 
 # ── Lancement ─────────────────────────────────────────────────────────────

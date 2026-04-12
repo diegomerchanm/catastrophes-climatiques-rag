@@ -1,12 +1,13 @@
 """
 Outils pour l'agent LangGraph Agentic RAG.
-6 outils :
+7 outils :
   1. get_weather       → météo actuelle (OpenMeteo)
   2. get_historical_weather → météo historique (OpenMeteo Archive)
   3. get_forecast      → prévisions météo 7 jours (OpenMeteo)
-  4. web_search        → recherche web (DuckDuckGo)
+  4. web_search        → recherche web (Tavily + DuckDuckGo fallback)
   5. calculator        → calculs mathématiques
   6. search_corpus     → recherche hybride dans le corpus RAG (BM25 + Dense)
+  7. send_email        → envoi d'email d'alerte climatique
 """
 
 import logging
@@ -478,6 +479,55 @@ def search_corpus(question: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
+# OUTIL 7 — Envoi d'email (alertes climatiques)
+# ══════════════════════════════════════════════════════════════════
+
+
+@tool
+def send_email(destinataire: str, sujet: str, contenu: str) -> str:
+    """
+    Envoie un email d'alerte ou de rapport climatique.
+
+    Args:
+        destinataire: Adresse email du destinataire.
+        sujet: Sujet du mail.
+        contenu: Corps du mail en texte.
+
+    Returns:
+        Confirmation d'envoi ou message d'erreur.
+    """
+    logger.info("Appel send_email vers %s : %s", destinataire, sujet)
+
+    email_address = os.getenv("EMAIL_ADDRESS")
+    email_password = os.getenv("EMAIL_APP_PASSWORD")
+
+    if not email_address or not email_password:
+        return "Email non configuré. Ajoutez EMAIL_ADDRESS et EMAIL_APP_PASSWORD dans .env"
+
+    try:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        msg = MIMEMultipart()
+        msg["From"] = email_address
+        msg["To"] = destinataire
+        msg["Subject"] = sujet
+        msg.attach(MIMEText(contenu, "plain", "utf-8"))
+
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(email_address, email_password)
+            server.send_message(msg)
+
+        logger.info("Email envoyé à %s", destinataire)
+        return f"Email envoyé à {destinataire} : {sujet}"
+    except Exception as exc:
+        logger.error("Erreur envoi email : %s", exc)
+        return f"Erreur lors de l'envoi : {exc}"
+
+
+# ══════════════════════════════════════════════════════════════════
 # Export : liste des outils pour l'agent LangGraph
 # ══════════════════════════════════════════════════════════════════
 
@@ -488,4 +538,5 @@ ALL_TOOLS = [
     web_search,
     calculator,
     search_corpus,
+    send_email,
 ]
