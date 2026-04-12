@@ -1,6 +1,10 @@
 langchain
+langchain-anthropic
 langchain-community
-langchain-groq
+langchain-core
+langchain-huggingface
+langchain-text-splitters
+langgraph
 faiss-cpu
 sentence-transformers
 chainlit
@@ -9,6 +13,7 @@ tiktoken
 duckduckgo-search
 requests
 python-dotenv
-langgraph
-langchain-text-splitters
-langchain-huggingface
+rank-bm25
+black
+pylint
+pytest
