@@ -11,6 +11,7 @@ Outils pour l'agent LangGraph Agentic RAG.
 
 import logging
 import math
+import os
 import re
 
 import requests
@@ -251,23 +252,43 @@ def get_forecast(city: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
-# OUTIL 4 — Recherche web (DuckDuckGo)
+# OUTIL 4 — Recherche web (Tavily en prio, DuckDuckGo en fallback)
 # ══════════════════════════════════════════════════════════════════
 
 
-@tool
-def web_search(query: str, max_results: int = 5) -> str:
-    """
-    Recherche web via DuckDuckGo pour des informations récentes.
+def _search_tavily(query: str, max_results: int = 5) -> str | None:
+    """Recherche via Tavily (optimisé LLM). Retourne None si indisponible."""
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        return None
 
-    Args:
-        query: Requête de recherche en langage naturel.
-        max_results: Nombre maximum de résultats (défaut : 5).
+    try:
+        from tavily import TavilyClient
 
-    Returns:
-        Liste des résultats avec titre, URL et extrait.
-    """
-    logger.info("Appel web_search pour : %s", query)
+        client = TavilyClient(api_key=api_key)
+        response = client.search(query, max_results=max_results)
+        results = response.get("results", [])
+
+        if not results:
+            return None
+
+        lines = [f"Résultats Tavily pour : « {query} »\n"]
+        for i, r in enumerate(results, 1):
+            title = r.get("title", "Sans titre")
+            url = r.get("url", "")
+            content = r.get("content", "")
+            snippet = content[:300].strip() + ("..." if len(content) > 300 else "")
+            lines.append(f"{i}. {title}\n   {url}\n   {snippet}\n")
+
+        logger.info("Recherche Tavily réussie pour : %s", query)
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.warning("Tavily indisponible, fallback DuckDuckGo : %s", exc)
+        return None
+
+
+def _search_duckduckgo(query: str, max_results: int = 5) -> str:
+    """Recherche via DuckDuckGo (fallback)."""
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
@@ -277,7 +298,7 @@ def web_search(query: str, max_results: int = 5) -> str:
     if not results:
         return f"Aucun résultat trouvé pour : « {query} »"
 
-    lines = [f"Résultats de recherche pour : « {query} »\n"]
+    lines = [f"Résultats DuckDuckGo pour : « {query} »\n"]
     for i, r in enumerate(results, 1):
         title = r.get("title", "Sans titre")
         href = r.get("href", "")
@@ -286,6 +307,30 @@ def web_search(query: str, max_results: int = 5) -> str:
         lines.append(f"{i}. {title}\n   {href}\n   {snippet}\n")
 
     return "\n".join(lines)
+
+
+@tool
+def web_search(query: str, max_results: int = 5) -> str:
+    """
+    Recherche web pour des informations récentes.
+    Utilise Tavily (optimisé LLM) en priorité, DuckDuckGo en fallback.
+
+    Args:
+        query: Requête de recherche en langage naturel.
+        max_results: Nombre maximum de résultats (défaut : 5).
+
+    Returns:
+        Liste des résultats avec titre, URL et extrait.
+    """
+    logger.info("Appel web_search pour : %s", query)
+
+    # Tavily en priorité
+    result = _search_tavily(query, max_results)
+    if result is not None:
+        return result
+
+    # Fallback DuckDuckGo
+    return _search_duckduckgo(query, max_results)
 
 
 # ══════════════════════════════════════════════════════════════════

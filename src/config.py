@@ -24,10 +24,10 @@ MODEL_PRICING = {
 
 AGENT_CONFIGS = {
     "orchestrator": {
-        "model": MODEL_HAIKU,
+        "model": MODEL_SONNET,
         "temperature": 0,
-        "max_tokens": 512,
-        "description": "Décide quel sous-agent appeler selon la question",
+        "max_tokens": 2048,
+        "description": "Orchestre les outils et génère la réponse finale",
     },
     "rag": {
         "model": MODEL_SONNET,

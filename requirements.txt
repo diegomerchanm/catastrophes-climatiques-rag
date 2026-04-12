@@ -10,10 +10,14 @@ sentence-transformers
 chainlit
 pypdf
 tiktoken
+tavily-python
 duckduckgo-search
 requests
 python-dotenv
 rank-bm25
+mlflow
+mcp
+faster-whisper
 black
 pylint
 pytest

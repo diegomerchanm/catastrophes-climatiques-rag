@@ -83,16 +83,54 @@ catastrophes-climatiques-rag/
 
 ## Conventions de code
 
-- **Variables, fonctions et commentaires** : en français
+### Langue
+- **Variables, fonctions, commentaires, docstrings** : en français
+- **Noms de modules et fichiers** : en français ou anglais technique (snake_case)
+
+### Nommage
+- **Fonctions et variables** : `snake_case` (ex: `creer_retriever`, `chat_history`)
+- **Constantes** : `UPPER_CASE` (ex: `CHUNK_SIZE`, `MODEL_SONNET`)
+- **Classes** : `PascalCase` (ex: `TokenCounter`, `AgentState`)
+- **Fichiers** : `snake_case.py` (ex: `hybrid_retriever.py`)
+
+### Docstrings
+- **Format Google** pour toutes les fonctions publiques
+- Inclure : description, Args, Returns
+- En français
+
+### Imports
+- Groupés par catégorie, séparés par une ligne vide :
+  1. Stdlib (`os`, `logging`, `math`)
+  2. Third-party (`langchain`, `requests`, `faiss`)
+  3. Locaux (`from src.config import ...`)
+
+### Type hints
+- Obligatoires sur les signatures de fonctions publiques
+- Optionnels sur les variables locales
+
+### Logging
+- Utiliser `logging` (pas `print()`)
+- Un logger par module : `logger = logging.getLogger(__name__)`
+
+### Emojis
+- Pas d'emojis dans le code source ni les retours d'outils
+- Emojis autorisés uniquement dans l'interface Chainlit (app.py)
+
+### Formattage et qualité
+- **Formatteur** : black (longueur max 88 caractères)
+- **Linter** : pylint (--disable=R,C)
+- **Tests** : pytest
+- Pas d'imports inutilisés
+- Pas de code mort (variables/fonctions jamais appelées)
+
+### Git
 - **Commits** : Conventional Commits
   - `feat:` nouvelle fonctionnalité
   - `fix:` correction de bug
   - `chore:` tâche technique (dépendances, config)
   - `docs:` documentation
 - **Ne jamais committer sur main directement**
-- **Formatteur** : black
-- **Linter** : pylint (--disable=R,C)
-- **Tests** : pytest
+- **Ne jamais committer de fichiers de données** (PDFs, CSV, modèles)
 
 ## Règles de sécurité
 

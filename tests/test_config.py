@@ -101,8 +101,8 @@ def test_token_counter_cost_estimation():
 
     counter.log("orchestrator", FakeResponse())
     summary = counter.summary()
-    # Haiku : input $0.25/M + output $1.25/M = $1.50
-    assert summary["estimated_cost_usd"] == pytest.approx(1.50, rel=0.01)
+    # Sonnet : input $3.00/M + output $15.00/M = $18.00
+    assert summary["estimated_cost_usd"] == pytest.approx(18.00, rel=0.01)
 
 
 def test_model_pricing_complete():
