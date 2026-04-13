@@ -1,27 +1,47 @@
 """
 Point d'entrée Chainlit — Interface conversationnelle.
-Branche l'agent agentic RAG multi-compétences avec la mémoire conversationnelle.
-Fonctionnalités : streaming, badges de route, sources, STT, upload PDF, monitoring LLMOps.
+Combine le router conditionnel (P3 — Jayson) avec l'agent agentic RAG (P4 — Xia).
+- Route "rag" et "chat" : streaming token par token via chain.astream() (pattern P3)
+- Route "agent" : agent ReAct 9 outils avec astream_events (pattern P4)
+- Fallback : si l'agent ou le streaming échoue, le router compilé P3 prend le relais
+Fonctionnalités : streaming, badges de route, sources, STT, upload PDF/DOCX, monitoring LLMOps.
 """
 
 import logging
+import os
 import tempfile
 
 import chainlit as cl
 from dotenv import load_dotenv
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agents.agent import get_agent, get_prompt_version, get_token_summary
 from src.memory.memory import add_exchange, get_session_history
+from src.router.router import (
+    RAG_PROMPT,
+    CHAT_PROMPT,
+    classify_question,
+    router as jayson_router,
+    RouterState,
+    rag_node,
+    chat_node,
+)
+from src.config import get_llm
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# ── Détection de route ────────────────────────────────────────────────────
+# ── Badges de route ──────────────────────────────────────────────────────
 
-ROUTE_BADGES = {
+ROUTE_LABELS = {
+    "rag": "RAG -- Reponse basee sur le corpus scientifique",
+    "agent": "Agent -- Outils externes utilises",
+    "chat": "Chat -- Conversation directe",
+}
+
+TOOL_BADGES = {
     "search_corpus": "RAG",
     "get_weather": "Agent",
     "get_historical_weather": "Agent",
@@ -34,28 +54,24 @@ ROUTE_BADGES = {
 }
 
 
-def _detecter_routes(messages: list) -> tuple[set, list]:
-    """Détecte les outils appelés et les sources RAG dans les messages."""
-    routes = set()
+def _detecter_outils_appeles(messages: list) -> tuple[set, list]:
+    """Detecte les outils appeles et les sources RAG dans les messages de l'agent."""
+    outils = set()
     sources = []
 
     for msg in messages:
         if isinstance(msg, AIMessage) and msg.tool_calls:
             for tc in msg.tool_calls:
                 nom = tc["name"]
-                if nom in ROUTE_BADGES:
-                    routes.add(ROUTE_BADGES[nom])
+                if nom in TOOL_BADGES:
+                    outils.add(TOOL_BADGES[nom])
 
-        # Extraire les sources RAG
         if hasattr(msg, "content") and "[Source:" in str(msg.content):
             for ligne in str(msg.content).split("\n"):
                 if "[Source:" in ligne and ligne.strip() not in sources:
                     sources.append(ligne.strip())
 
-    if not routes:
-        routes.add("Chat")
-
-    return routes, sources
+    return outils, sources
 
 
 # ── Initialisation de la session ──────────────────────────────────────────
@@ -64,22 +80,24 @@ def _detecter_routes(messages: list) -> tuple[set, list]:
 @cl.on_chat_start
 async def on_chat_start():
     """Initialise une nouvelle session de chat."""
-    session_id = cl.user_session.get("id")
+    session_id = cl.user_session.get("id", "default")
     cl.user_session.set("session_id", session_id)
     logger.info("Nouvelle session Chainlit : %s", session_id)
 
     await cl.Message(
         content=(
-            "**Assistant Catastrophes Climatiques**\n\n"
+            "**Assistant Catastrophes Climatiques -- SAEARCH**\n\n"
             "Je peux :\n"
-            "- Répondre à vos questions sur le corpus scientifique "
+            "- Repondre a vos questions sur le corpus scientifique "
             "(GIEC, Copernicus, EM-DAT...)\n"
-            "- Consulter la météo actuelle, historique ou les prévisions\n"
+            "- Consulter la meteo actuelle, historique ou les previsions\n"
             "- Effectuer des calculs\n"
-            "- Rechercher des actualités sur le web\n"
+            "- Rechercher des actualites sur le web\n"
+            "- Predire le risque climatique par pays (modele ML)\n"
+            "- Calculer un score de risque agrege multi-sources\n"
             "- Croiser toutes ces sources pour une analyse de risque\n"
             "- Envoyer des alertes par email\n"
-            "- Accepter des documents PDF pour enrichir le corpus\n"
+            "- Accepter des documents PDF/DOCX pour enrichir le corpus\n"
             "- Comprendre les messages vocaux\n\n"
             "Comment puis-je vous aider ?"
         )
@@ -91,11 +109,11 @@ async def on_chat_start():
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    """Traite un message utilisateur avec streaming et badges de route."""
+    """Traite un message utilisateur : routing, streaming, badges, monitoring."""
     session_id = cl.user_session.get("session_id")
     question = message.content
 
-    # Vérifier si l'utilisateur a uploadé des fichiers (PDF ou DOCX)
+    # Upload PDF ou DOCX
     if message.elements:
         for element in message.elements:
             if element.name.endswith(".pdf"):
@@ -106,78 +124,57 @@ async def on_message(message: cl.Message):
         if not question or not question.strip():
             return
 
-    # Récupérer l'historique de la session
+    # Recuperer l'historique de la session
     history = get_session_history(session_id)
     chat_history = history.messages
 
-    # Message de streaming
-    msg = cl.Message(content="")
+    # Etape 1 : classifier la question via le router de Jayson (P3)
+    state = RouterState(
+        question=question,
+        route="",
+        answer="",
+        sources=[],
+        history=chat_history,
+    )
+    state = classify_question(state)
+    route = state["route"]
+    logger.info("Route detectee : %s", route)
+
+    # Afficher le badge de route en debut de message (pattern P3)
+    badge = ROUTE_LABELS.get(route, "")
+    msg = cl.Message(content=f"**{badge}**\n\n")
     await msg.send()
 
-    # Exécuter l'agent avec streaming
-    from langchain_core.messages import HumanMessage
-
-    agent = get_agent()
-    messages = (chat_history or []) + [HumanMessage(content=question)]
-
     answer = ""
-    all_messages = []
+    sources = []
+    agent_outils = set()
 
-    async for event in agent.astream_events({"messages": messages}, version="v2"):
-        kind = event["event"]
+    # Etape 2 : traitement selon la route
+    if route == "rag":
+        # Streaming RAG token par token (pattern P3 — chain.astream)
+        answer, sources = await _handle_rag(msg, question)
 
-        # Streaming des tokens de la réponse finale
-        if kind == "on_chat_model_stream":
-            chunk = event["data"]["chunk"]
-            if hasattr(chunk, "content") and chunk.content:
-                content = chunk.content
-                if isinstance(content, list):
-                    answer += "".join(
-                        c.get("text", "") if isinstance(c, dict) else str(c)
-                        for c in content
-                    )
-                else:
-                    answer += content
-                msg.content = answer
-                await msg.update()
+    elif route == "agent":
+        # Agent ReAct 9 outils avec streaming (pattern P4 — astream_events)
+        answer, agent_outils, sources = await _handle_agent(msg, question, chat_history)
 
-        # Capturer tous les messages pour détecter les routes
-        if kind == "on_chain_end" and "messages" in event.get("data", {}).get(
-            "output", {}
-        ):
-            all_messages = event["data"]["output"]["messages"]
+    else:
+        # Streaming Chat token par token (pattern P3 — chain.astream)
+        answer = await _handle_chat(msg, question, chat_history)
 
-    # Si pas de streaming, fallback sur le résultat complet
-    if not answer:
-        from src.agents.agent import run_agent
-
-        answer = run_agent(question, chat_history=chat_history)
-        msg.content = answer
-        await msg.update()
-
-    # Mettre à jour la mémoire
+    # Mettre a jour la memoire
     add_exchange(session_id, question, answer)
 
-    # Détecter les routes et sources
-    routes, sources = _detecter_routes(all_messages)
+    # Footer : sources + monitoring LLMOps
+    footer = ""
+    if route == "agent" and agent_outils:
+        badge_text = " + ".join(sorted(agent_outils))
+        footer += f"\n\n---\n**Outils utilises :** {badge_text}"
 
-    # Badge de route
-    badge_text = " + ".join(sorted(routes))
-    badge_map = {
-        "RAG": "RAG — Réponse basée sur le corpus scientifique",
-        "Agent": "Agent — Outil externe utilisé",
-        "ML": "ML — Prédiction modèle EM-DAT",
-        "Scoring": "Scoring — Score de risque agrégé multi-sources",
-        "Chat": "Chat — Conversation directe",
-    }
-    badges = [badge_map.get(r, r) for r in sorted(routes)]
-
-    # Sources RAG en fin de message
-    footer = f"\n\n---\n**Route :** {badge_text}"
     if sources:
         footer += "\n\n**Sources :**\n"
-        for src in sources[:5]:
-            footer += f"- {src}\n"
+        for src_item in sources[:5]:
+            footer += f"- {src_item}\n"
 
     # Monitoring LLMOps
     tokens = get_token_summary()
@@ -186,20 +183,204 @@ async def on_message(message: cl.Message):
         footer += (
             f"\n*Tokens : {tokens['total_tokens']} "
             f"(in: {tokens['total_input_tokens']}, "
-            f"out: {tokens['total_output_tokens']}) — "
-            f"${cost:.4f} — {get_prompt_version()}*"
+            f"out: {tokens['total_output_tokens']}) -- "
+            f"${cost:.4f} -- {get_prompt_version()}*"
         )
 
-    msg.content = answer + footer
-    await msg.update()
+    if footer:
+        msg.content = answer + footer
+        await msg.update()
+
+
+# ── Route RAG : streaming via chain.astream (pattern P3) ─────────────────
+
+
+async def _handle_rag(msg, question: str) -> tuple[str, list]:
+    """Route RAG : recherche dans le corpus puis streaming de la reponse."""
+    try:
+        from src.rag.embeddings import charger_vector_store
+        from src.rag.retriever import creer_retriever, interroger_rag
+
+        vector_store = charger_vector_store()
+        if vector_store is None:
+            error_msg = "Vector store non disponible. Lancez d'abord embeddings.py."
+            msg.content += error_msg
+            await msg.update()
+            return error_msg, []
+
+        retriever = creer_retriever(vector_store)
+        resultat = interroger_rag(retriever, question)
+        contexte = resultat["contexte"]
+        documents = resultat["documents"]
+
+        # Sources nettoyees (pattern P3 — os.path.basename)
+        sources = []
+        for doc in documents:
+            source = os.path.basename(doc.metadata.get("source", "inconnu"))
+            page = doc.metadata.get("page", "?")
+            sources.append(f"[Source: {source}, Page: {page}]")
+
+        # Streaming token par token (pattern P3 — chain.astream)
+        llm = get_llm("rag")
+        chain = RAG_PROMPT | llm
+        answer = ""
+
+        async for chunk in chain.astream({"context": contexte, "question": question}):
+            if hasattr(chunk, "content") and chunk.content:
+                answer += chunk.content
+                msg.content = f"**{ROUTE_LABELS['rag']}**\n\n{answer}"
+                await msg.update()
+
+        logger.info("RAG : %d sources, %d car", len(sources), len(answer))
+        return answer, sources
+
+    except Exception as exc:
+        logger.error("Erreur RAG streaming : %s — fallback router P3", exc)
+        # Fallback : utiliser rag_node de Jayson (P3) sans streaming
+        try:
+            state = RouterState(
+                question=question,
+                route="rag",
+                answer="",
+                sources=[],
+                history=[],
+            )
+            result = rag_node(state)
+            answer = result["answer"]
+            sources = [f"[Source: {s}]" for s in result.get("sources", [])]
+            msg.content = f"**{ROUTE_LABELS['rag']}**\n\n{answer}"
+            await msg.update()
+            return answer, sources
+        except Exception as exc2:
+            logger.error("Erreur RAG fallback P3 : %s", exc2)
+            error_msg = f"Erreur RAG : {exc2}"
+            msg.content += error_msg
+            await msg.update()
+            return error_msg, []
+
+
+# ── Route Agent : agent ReAct 9 outils (pattern P4) ──────────────────────
+
+
+async def _handle_agent(
+    msg, question: str, chat_history: list
+) -> tuple[str, set, list]:
+    """Route Agent : agent ReAct avec streaming astream_events."""
+    agent = get_agent()
+    messages = (chat_history or []) + [HumanMessage(content=question)]
+
+    answer = ""
+    all_messages = []
+
+    try:
+        async for event in agent.astream_events({"messages": messages}, version="v2"):
+            kind = event["event"]
+
+            if kind == "on_chat_model_stream":
+                chunk = event["data"]["chunk"]
+                if hasattr(chunk, "content") and chunk.content:
+                    content = chunk.content
+                    if isinstance(content, list):
+                        answer += "".join(
+                            c.get("text", "") if isinstance(c, dict) else str(c)
+                            for c in content
+                        )
+                    else:
+                        answer += content
+                    msg.content = f"**{ROUTE_LABELS['agent']}**\n\n{answer}"
+                    await msg.update()
+
+            if kind == "on_chain_end" and "messages" in event.get("data", {}).get(
+                "output", {}
+            ):
+                all_messages = event["data"]["output"]["messages"]
+
+    except Exception as exc:
+        logger.error("Erreur Agent streaming : %s", exc)
+
+    # Fallback 1 : appel synchrone agent P4
+    if not answer:
+        try:
+            from src.agents.agent import run_agent
+
+            answer = run_agent(question, chat_history=chat_history)
+            msg.content = f"**{ROUTE_LABELS['agent']}**\n\n{answer}"
+            await msg.update()
+        except Exception as exc:
+            logger.warning("Agent P4 echoue : %s — fallback router P3", exc)
+            # Fallback 2 : router complet de Jayson (P3)
+            try:
+                state = RouterState(
+                    question=question,
+                    route="agent",
+                    answer="",
+                    sources=[],
+                    history=chat_history or [],
+                )
+                result = jayson_router.invoke(state)
+                answer = result["answer"]
+                msg.content = f"**{ROUTE_LABELS['agent']}**\n\n{answer}"
+                await msg.update()
+            except Exception as exc2:
+                logger.error("Erreur Router P3 fallback : %s", exc2)
+                answer = f"Erreur Agent : {exc2}"
+                msg.content += answer
+                await msg.update()
+
+    # Detecter les outils appeles et les sources
+    agent_outils, sources = _detecter_outils_appeles(all_messages)
+    logger.info("Agent : %d outils, %d car", len(agent_outils), len(answer))
+    return answer, agent_outils, sources
+
+
+# ── Route Chat : streaming via chain.astream (pattern P3) ────────────────
+
+
+async def _handle_chat(msg, question: str, chat_history: list) -> str:
+    """Route Chat : conversation directe avec streaming."""
+    llm = get_llm("chat")
+    chain = CHAT_PROMPT | llm
+    answer = ""
+
+    try:
+        async for chunk in chain.astream(
+            {"question": question, "history": chat_history}
+        ):
+            if hasattr(chunk, "content") and chunk.content:
+                answer += chunk.content
+                msg.content = f"**{ROUTE_LABELS['chat']}**\n\n{answer}"
+                await msg.update()
+    except Exception as exc:
+        logger.error("Erreur Chat streaming : %s — fallback router P3", exc)
+        # Fallback : utiliser chat_node de Jayson (P3) sans streaming
+        try:
+            state = RouterState(
+                question=question,
+                route="chat",
+                answer="",
+                sources=[],
+                history=chat_history,
+            )
+            result = chat_node(state)
+            answer = result["answer"]
+            msg.content = f"**{ROUTE_LABELS['chat']}**\n\n{answer}"
+            await msg.update()
+        except Exception as exc2:
+            logger.error("Erreur Chat fallback P3 : %s", exc2)
+            answer = f"Erreur Chat : {exc2}"
+            msg.content += answer
+            await msg.update()
+
+    logger.info("Chat : %d car", len(answer))
+    return answer
 
 
 # ── Upload document dynamique (PDF + DOCX) ───────────────────────────────
 
 
 async def _integrer_document(element, doc_type: str = "pdf") -> None:
-    """Intègre un PDF ou DOCX uploadé dans le corpus RAG en temps réel."""
-    logger.info("Upload %s reçu : %s", doc_type.upper(), element.name)
+    """Integre un PDF ou DOCX uploade dans le corpus RAG en temps reel."""
+    logger.info("Upload %s recu : %s", doc_type.upper(), element.name)
 
     try:
         from src.config import FAISS_STORE_PATH
@@ -224,7 +405,7 @@ async def _integrer_document(element, doc_type: str = "pdf") -> None:
 
             loader = Docx2txtLoader(tmp_path)
         else:
-            await cl.Message(content=f"Format non supporté : {doc_type}").send()
+            await cl.Message(content=f"Format non supporte : {doc_type}").send()
             return
 
         pages = loader.load()
@@ -235,32 +416,32 @@ async def _integrer_document(element, doc_type: str = "pdf") -> None:
             vector_store.add_documents(chunks)
             vector_store.save_local(FAISS_STORE_PATH)
             logger.info(
-                "PDF %s intégré : %d pages, %d chunks",
+                "PDF %s integre : %d pages, %d chunks",
                 element.name,
                 len(pages),
                 len(chunks),
             )
             await cl.Message(
                 content=(
-                    f"**Document intégré** : {element.name}\n"
+                    f"**Document integre** : {element.name}\n"
                     f"- {len(pages)} pages lues\n"
-                    f"- {len(chunks)} passages indexés\n"
-                    f"- Disponible immédiatement pour les recherches"
+                    f"- {len(chunks)} passages indexes\n"
+                    f"- Disponible immediatement pour les recherches"
                 )
             ).send()
         else:
             await cl.Message(
-                content="Vector store non initialisé. Lancez d'abord embeddings.py."
+                content="Vector store non initialise. Lancez d'abord embeddings.py."
             ).send()
 
     except Exception as exc:
-        logger.error("Erreur intégration PDF : %s", exc)
+        logger.error("Erreur integration PDF : %s", exc)
         await cl.Message(
-            content=f"Erreur lors de l'intégration de {element.name} : {exc}"
+            content=f"Erreur lors de l'integration de {element.name} : {exc}"
         ).send()
 
 
-# ── Speech-to-text (optionnel — dépend de la version Chainlit) ────────────
+# ── Speech-to-text (optionnel — depend de la version Chainlit) ────────────
 
 
 try:
@@ -282,7 +463,7 @@ try:
         if not audio_buffer:
             return
 
-        logger.info("Audio reçu : %d octets", len(audio_buffer))
+        logger.info("Audio recu : %d octets", len(audio_buffer))
 
         try:
             from faster_whisper import WhisperModel
@@ -304,7 +485,7 @@ try:
                 fake_message = cl.Message(content=text)
                 await on_message(fake_message)
             else:
-                await cl.Message(content="Aucun texte détecté dans l'audio.").send()
+                await cl.Message(content="Aucun texte detecte dans l'audio.").send()
 
         except ImportError:
             await cl.Message(
@@ -315,4 +496,4 @@ try:
             await cl.Message(content=f"Erreur de transcription : {exc}").send()
 
 except (AttributeError, KeyError):
-    logger.info("Speech-to-text non supporté par cette version de Chainlit")
+    logger.info("Speech-to-text non supporte par cette version de Chainlit")
