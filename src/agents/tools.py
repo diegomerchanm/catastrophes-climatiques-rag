@@ -524,6 +524,191 @@ def send_email(destinataire: str, sujet: str, contenu: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
+# OUTIL 8 — Prédiction ML du risque catastrophe (modèle EM-DAT)
+# ══════════════════════════════════════════════════════════════════
+
+_cached_predictions = None
+
+
+def _load_predictions() -> dict | None:
+    """Charge les prédictions d'impact 2030 pré-calculées (NB10)."""
+    global _cached_predictions
+    if _cached_predictions is not None:
+        return _cached_predictions
+
+    predictions_path = os.path.join("outputs", "NB10_predictions_2030.csv")
+    if not os.path.exists(predictions_path):
+        logger.warning("Prédictions ML non trouvées : %s", predictions_path)
+        return None
+
+    import csv
+
+    _cached_predictions = {}
+    with open(predictions_path, encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            _cached_predictions[row["country"].lower()] = {
+                "country": row["country"],
+                "continent": row["continent"],
+                "deaths_pred": float(row["deaths_pred"]),
+                "risk_pred": row["risk_pred"],
+            }
+    logger.info("Prédictions ML chargées : %d pays", len(_cached_predictions))
+    return _cached_predictions
+
+
+@tool
+def predict_risk(country: str) -> str:
+    """
+    Prédit le niveau d'exposition aux catastrophes climatiques pour un pays,
+    basé sur un modèle ML entraîné sur les données EM-DAT (1900-2020).
+    Retourne l'impact humain moyen annuel prédit pour la décennie 2030
+    et le niveau de risque.
+
+    Args:
+        country: Nom du pays en anglais (ex: "France", "India", "Bangladesh")
+
+    Returns:
+        Prédiction : impact humain moyen/an, niveau de risque, continent.
+    """
+    logger.info("Appel predict_risk pour %s", country)
+    predictions = _load_predictions()
+
+    if predictions is None:
+        return (
+            "Modèle ML non disponible. Lancez d'abord le notebook NB10 "
+            "pour générer les prédictions (outputs/NB10_predictions_2030.csv)."
+        )
+
+    key = country.strip().lower()
+    if key not in predictions:
+        # Recherche approximative
+        matches = [k for k in predictions if key in k or k in key]
+        if matches:
+            key = matches[0]
+        else:
+            pays_dispo = ", ".join(
+                sorted(set(p["country"] for p in predictions.values()))[:20]
+            )
+            return (
+                f"Pays « {country} » non trouvé dans les prédictions ML. "
+                f"Exemples disponibles : {pays_dispo}..."
+            )
+
+    pred = predictions[key]
+    niveau = pred["risk_pred"]
+    victimes = pred["deaths_pred"]
+
+    return (
+        f"Prédiction ML 2030 pour {pred['country']} ({pred['continent']})\n"
+        f"- Victimes moyennes annuelles prédites : {victimes:.0f}\n"
+        f"- Niveau d'exposition : {niveau}\n"
+        f"- Source : modèle entraîné sur EM-DAT (1900-2020), "
+        f"pipeline sklearn (régression + classification)\n"
+        f"- Limite : prédiction statistique basée sur les tendances passées, "
+        f"ne tient pas compte des politiques d'adaptation"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+# OUTIL 9 — Score de risque agrégé multi-sources
+# ══════════════════════════════════════════════════════════════════
+
+_RISK_LEVELS = {
+    "Aucun": 0.0,
+    "Faible": 0.25,
+    "Modéré": 0.50,
+    "Élevé": 0.75,
+    "Critique": 1.0,
+}
+
+_POIDS = {
+    "meteo": 0.35,
+    "corpus": 0.25,
+    "ml_predict": 0.25,
+    "historique": 0.15,
+}
+
+
+@tool
+def calculer_score_risque(
+    precipitation_prevue_mm: float,
+    seuil_critique_mm: float,
+    risk_level_ml: str,
+    a_precedent_historique: bool,
+    corpus_mentionne_risque: bool,
+) -> str:
+    """
+    Calcule un score de risque agrégé (0-1) en croisant 4 sources :
+    météo (précipitations vs seuil), ML (prédiction EM-DAT),
+    corpus (GIEC mentionne un risque), historique (précédent connu).
+
+    Args:
+        precipitation_prevue_mm: Précipitations prévues en mm.
+        seuil_critique_mm: Seuil critique du GIEC en mm.
+        risk_level_ml: Niveau de risque ML (Aucun/Faible/Modéré/Élevé/Critique).
+        a_precedent_historique: True si un événement similaire a eu lieu dans le passé.
+        corpus_mentionne_risque: True si le corpus GIEC mentionne un risque pour la zone.
+
+    Returns:
+        Score agrégé avec détail par source et décision GO/NO-GO.
+    """
+    logger.info(
+        "Calcul score risque : %.0fmm vs %.0fmm seuil, ML=%s",
+        precipitation_prevue_mm,
+        seuil_critique_mm,
+        risk_level_ml,
+    )
+
+    # Score météo : ratio précipitations / seuil (plafonné à 1.0)
+    if seuil_critique_mm > 0:
+        score_meteo = min(precipitation_prevue_mm / seuil_critique_mm, 1.0)
+    else:
+        score_meteo = 0.5
+
+    # Score ML
+    score_ml = _RISK_LEVELS.get(risk_level_ml, 0.5)
+
+    # Score corpus
+    score_corpus = 0.8 if corpus_mentionne_risque else 0.2
+
+    # Score historique
+    score_historique = 0.9 if a_precedent_historique else 0.1
+
+    # Agrégation pondérée
+    score_final = (
+        _POIDS["meteo"] * score_meteo
+        + _POIDS["ml_predict"] * score_ml
+        + _POIDS["corpus"] * score_corpus
+        + _POIDS["historique"] * score_historique
+    )
+
+    # Décision
+    if score_final >= 0.75:
+        decision = "CRITIQUE — Alerte immédiate recommandée"
+    elif score_final >= 0.50:
+        decision = "ÉLEVÉ — Vigilance renforcée"
+    elif score_final >= 0.25:
+        decision = "MODÉRÉ — Surveillance normale"
+    else:
+        decision = "FAIBLE — Pas d'action requise"
+
+    return (
+        f"Score de risque agrégé : {score_final:.2f} / 1.00\n"
+        f"\nDétail par source :\n"
+        f"  - Météo      ({_POIDS['meteo']:.0%}) : {score_meteo:.2f} "
+        f"({precipitation_prevue_mm:.0f}mm / {seuil_critique_mm:.0f}mm seuil)\n"
+        f"  - ML EM-DAT  ({_POIDS['ml_predict']:.0%}) : {score_ml:.2f} "
+        f"(niveau {risk_level_ml})\n"
+        f"  - Corpus GIEC ({_POIDS['corpus']:.0%}) : {score_corpus:.2f} "
+        f"({'risque mentionné' if corpus_mentionne_risque else 'pas de mention'})\n"
+        f"  - Historique  ({_POIDS['historique']:.0%}) : {score_historique:.2f} "
+        f"({'précédent connu' if a_precedent_historique else 'pas de précédent'})\n"
+        f"\nDécision : {decision}"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
 # Export : liste des outils pour l'agent LangGraph
 # ══════════════════════════════════════════════════════════════════
 
@@ -535,4 +720,6 @@ ALL_TOOLS = [
     calculator,
     search_corpus,
     send_email,
+    predict_risk,
+    calculer_score_risque,
 ]

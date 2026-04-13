@@ -29,6 +29,8 @@ ROUTE_BADGES = {
     "web_search": "Agent",
     "calculator": "Agent",
     "send_email": "Agent",
+    "predict_risk": "ML",
+    "calculer_score_risque": "Scoring",
 }
 
 
@@ -164,6 +166,8 @@ async def on_message(message: cl.Message):
     badge_map = {
         "RAG": "RAG — Réponse basée sur le corpus scientifique",
         "Agent": "Agent — Outil externe utilisé",
+        "ML": "ML — Prédiction modèle EM-DAT",
+        "Scoring": "Scoring — Score de risque agrégé multi-sources",
         "Chat": "Chat — Conversation directe",
     }
     badges = [badge_map.get(r, r) for r in sorted(routes)]
@@ -213,9 +217,11 @@ async def _integrer_document(element, doc_type: str = "pdf") -> None:
 
         if doc_type == "pdf":
             from langchain_community.document_loaders import PyPDFLoader
+
             loader = PyPDFLoader(tmp_path)
         elif doc_type == "docx":
             from langchain_community.document_loaders import Docx2txtLoader
+
             loader = Docx2txtLoader(tmp_path)
         else:
             await cl.Message(content=f"Format non supporté : {doc_type}").send()

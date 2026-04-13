@@ -12,9 +12,11 @@ from mcp.server.fastmcp import FastMCP
 
 from src.agents.tools import (
     calculator,
+    calculer_score_risque,
     get_forecast,
     get_historical_weather,
     get_weather,
+    predict_risk,
     search_corpus,
     send_email,
     web_search,
@@ -71,11 +73,39 @@ def recherche_corpus(question: str) -> str:
 @mcp.tool()
 def envoyer_email(destinataire: str, sujet: str, contenu: str) -> str:
     """Envoie un email d'alerte ou de rapport climatique."""
-    return send_email.invoke({
-        "destinataire": destinataire,
-        "sujet": sujet,
-        "contenu": contenu,
-    })
+    return send_email.invoke(
+        {
+            "destinataire": destinataire,
+            "sujet": sujet,
+            "contenu": contenu,
+        }
+    )
+
+
+@mcp.tool()
+def prediction_risque(pays: str) -> str:
+    """Prédit le niveau d'exposition aux catastrophes climatiques pour un pays (modèle ML EM-DAT)."""
+    return predict_risk.invoke({"country": pays})
+
+
+@mcp.tool()
+def score_risque(
+    precipitation_prevue_mm: float,
+    seuil_critique_mm: float,
+    risk_level_ml: str,
+    a_precedent_historique: bool,
+    corpus_mentionne_risque: bool,
+) -> str:
+    """Calcule un score de risque agrégé (0-1) croisant météo, ML, corpus et historique."""
+    return calculer_score_risque.invoke(
+        {
+            "precipitation_prevue_mm": precipitation_prevue_mm,
+            "seuil_critique_mm": seuil_critique_mm,
+            "risk_level_ml": risk_level_ml,
+            "a_precedent_historique": a_precedent_historique,
+            "corpus_mentionne_risque": corpus_mentionne_risque,
+        }
+    )
 
 
 # ── Lancement ─────────────────────────────────────────────────────────────
