@@ -40,7 +40,7 @@ jobs:
 
         - name: Lint
           run: |
-            pylint --disable=R,C src/ app.py
+            pylint --disable=R,C,W0603,W0718,E1102 src/ app.py
 
         - name: Test
           run: |

@@ -119,9 +119,7 @@ async def on_message(message: cl.Message):
     answer = ""
     all_messages = []
 
-    async for event in agent.astream_events(
-        {"messages": messages}, version="v2"
-    ):
+    async for event in agent.astream_events({"messages": messages}, version="v2"):
         kind = event["event"]
 
         # Streaming des tokens de la réponse finale
@@ -133,12 +131,15 @@ async def on_message(message: cl.Message):
                 await msg.update()
 
         # Capturer tous les messages pour détecter les routes
-        if kind == "on_chain_end" and "messages" in event.get("data", {}).get("output", {}):
+        if kind == "on_chain_end" and "messages" in event.get("data", {}).get(
+            "output", {}
+        ):
             all_messages = event["data"]["output"]["messages"]
 
     # Si pas de streaming, fallback sur le résultat complet
     if not answer:
         from src.agents.agent import run_agent
+
         answer = run_agent(question, chat_history=chat_history)
         msg.content = answer
         await msg.update()
@@ -212,7 +213,9 @@ async def _integrer_pdf(element) -> None:
             vector_store.save_local(FAISS_STORE_PATH)
             logger.info(
                 "PDF %s intégré : %d pages, %d chunks",
-                element.name, len(pages), len(chunks),
+                element.name,
+                len(pages),
+                len(chunks),
             )
             await cl.Message(
                 content=(
@@ -234,55 +237,59 @@ async def _integrer_pdf(element) -> None:
         ).send()
 
 
-# ── Speech-to-text ────────────────────────────────────────────────────────
+# ── Speech-to-text (optionnel — dépend de la version Chainlit) ────────────
 
 
-@cl.on_audio_chunk
-async def on_audio_chunk(chunk: cl.AudioChunk):
-    """Accumule les chunks audio."""
-    if chunk.isStart:
-        cl.user_session.set("audio_buffer", b"")
-        cl.user_session.set("audio_mime", chunk.mimeType)
+try:
 
-    buffer = cl.user_session.get("audio_buffer")
-    cl.user_session.set("audio_buffer", buffer + chunk.data)
+    @cl.on_audio_chunk
+    async def on_audio_chunk(chunk):
+        """Accumule les chunks audio."""
+        if chunk.isStart:
+            cl.user_session.set("audio_buffer", b"")
+            cl.user_session.set("audio_mime", chunk.mimeType)
 
+        buffer = cl.user_session.get("audio_buffer")
+        cl.user_session.set("audio_buffer", buffer + chunk.data)
 
-@cl.on_audio_end
-async def on_audio_end(elements: list):
-    """Transcrit l'audio puis traite comme un message texte."""
-    audio_buffer = cl.user_session.get("audio_buffer")
-    if not audio_buffer:
-        return
+    @cl.on_audio_end
+    async def on_audio_end(elements: list):
+        """Transcrit l'audio puis traite comme un message texte."""
+        audio_buffer = cl.user_session.get("audio_buffer")
+        if not audio_buffer:
+            return
 
-    logger.info("Audio reçu : %d octets", len(audio_buffer))
+        logger.info("Audio reçu : %d octets", len(audio_buffer))
 
-    try:
-        from faster_whisper import WhisperModel
+        try:
+            from faster_whisper import WhisperModel
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tmp.write(audio_buffer)
-            tmp_path = tmp.name
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                tmp.write(audio_buffer)
+                tmp_path = tmp.name
 
-        model = WhisperModel("small", device="cpu", compute_type="int8")
-        segments, _ = model.transcribe(tmp_path, language="fr")
-        text = " ".join(segment.text for segment in segments)
+            model = WhisperModel("small", device="cpu", compute_type="int8")
+            segments, _ = model.transcribe(tmp_path, language="fr")
+            text = " ".join(segment.text for segment in segments)
 
-        logger.info("Transcription : %s", text[:100])
+            logger.info("Transcription : %s", text[:100])
 
-        if text.strip():
+            if text.strip():
+                await cl.Message(
+                    content=f"*Transcription : {text}*", author="user"
+                ).send()
+                fake_message = cl.Message(content=text)
+                await on_message(fake_message)
+            else:
+                await cl.Message(content="Aucun texte détecté dans l'audio.").send()
+
+        except ImportError:
             await cl.Message(
-                content=f"*Transcription : {text}*", author="user"
+                content="STT non disponible. Installez : pip install faster-whisper"
             ).send()
-            fake_message = cl.Message(content=text)
-            await on_message(fake_message)
-        else:
-            await cl.Message(content="Aucun texte détecté dans l'audio.").send()
+        except Exception as exc:
+            logger.error("Erreur STT : %s", exc)
+            await cl.Message(content=f"Erreur de transcription : {exc}").send()
 
-    except ImportError:
-        await cl.Message(
-            content="STT non disponible. Installez : pip install faster-whisper"
-        ).send()
-    except Exception as exc:
-        logger.error("Erreur STT : %s", exc)
-        await cl.Message(content=f"Erreur de transcription : {exc}").send()
+except (AttributeError, KeyError):
+    logger.info("Speech-to-text non supporté par cette version de Chainlit")

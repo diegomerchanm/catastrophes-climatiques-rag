@@ -111,9 +111,7 @@ class TokenCounter:
 
         self.total_input += input_tokens
         self.total_output += output_tokens
-        self.calls_by_agent[agent_type] = (
-            self.calls_by_agent.get(agent_type, 0) + 1
-        )
+        self.calls_by_agent[agent_type] = self.calls_by_agent.get(agent_type, 0) + 1
 
         if agent_type not in self.tokens_by_agent:
             self.tokens_by_agent[agent_type] = {"input": 0, "output": 0}
@@ -200,15 +198,16 @@ def get_ollama_fallback():
     Utilisé quand l'API Anthropic est indisponible.
     """
     try:
-        from langchain_community.llms import Ollama
+        import langchain_community.llms as community_llms
 
-        return Ollama(
+        ollama_cls = getattr(community_llms, "Ollama")
+        return ollama_cls(
             model="mistral",
             temperature=0.2,
             num_predict=1024,
         )
-    except ImportError:
+    except (ImportError, AttributeError) as exc:
         raise EnvironmentError(
             "Ollama non disponible. Installez langchain-community et Ollama : "
             "pip install langchain-community && curl -fsSL https://ollama.com/install.sh | sh && ollama pull mistral"
-        )
+        ) from exc

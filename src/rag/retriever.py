@@ -61,11 +61,15 @@ if __name__ == "__main__":
     vector_store = charger_vector_store()
 
     if vector_store is None:
-        print("Impossible de charger le vector store. Veuillez d'abord exécuter embeddings.py.")
+        print(
+            "Impossible de charger le vector store. Veuillez d'abord exécuter embeddings.py."
+        )
     else:
         retriever = creer_retriever(vector_store)
 
-        question = "Quelles régions sont les plus vulnérables aux inondations selon le GIEC ?"
+        question = (
+            "Quelles régions sont les plus vulnérables aux inondations selon le GIEC ?"
+        )
         print(f"\nQuestion : {question}\n")
 
         resultat = interroger_rag(retriever, question)

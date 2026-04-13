@@ -18,7 +18,13 @@ from langgraph.prebuilt import ToolNode
 from typing_extensions import TypedDict
 
 from src.agents.tools import ALL_TOOLS
-from src.config import TOKEN_TRACKING, TokenCounter, get_fallback_llm, get_llm, get_ollama_fallback
+from src.config import (
+    TOKEN_TRACKING,
+    TokenCounter,
+    get_fallback_llm,
+    get_llm,
+    get_ollama_fallback,
+)
 from src.prompts.agent_prompts import CURRENT_VERSION, get_prompt
 
 load_dotenv()
@@ -77,7 +83,11 @@ def call_model(state: AgentState) -> AgentState:
     response = llm_with_tools.invoke(messages)
 
     # Monitoring des tokens (si activé)
-    if TOKEN_TRACKING and hasattr(response, "usage_metadata") and response.usage_metadata:
+    if (
+        TOKEN_TRACKING
+        and hasattr(response, "usage_metadata")
+        and response.usage_metadata
+    ):
         token_counter.log("orchestrator", response)
         logger.debug(
             "Tokens : in=%d, out=%d",
@@ -131,7 +141,9 @@ def get_agent():
     global _agent_graph
     if _agent_graph is None:
         _agent_graph = build_agent_graph()
-        logger.info("Agent RAG compilé (prompt %s, %d outils)", PROMPT_VERSION, len(ALL_TOOLS))
+        logger.info(
+            "Agent RAG compilé (prompt %s, %d outils)", PROMPT_VERSION, len(ALL_TOOLS)
+        )
     return _agent_graph
 
 
@@ -172,7 +184,9 @@ def run_agent(question: str, chat_history: list[BaseMessage] | None = None) -> s
 
     logger.info(
         "Réponse générée (%d car, %d outils, %.2fs)",
-        len(answer), len(outils_appeles), duree,
+        len(answer),
+        len(outils_appeles),
+        duree,
     )
 
     # Tracking MLflow

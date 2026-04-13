@@ -111,9 +111,7 @@ def get_weather(city: str) -> str:
             "timezone": "auto",
             "forecast_days": 1,
         }
-        resp = requests.get(
-            f"{OPENMETEO_BASE_URL}/forecast", params=params, timeout=10
-        )
+        resp = requests.get(f"{OPENMETEO_BASE_URL}/forecast", params=params, timeout=10)
         resp.raise_for_status()
         cur = resp.json()["current"]
     except requests.RequestException as exc:
@@ -170,9 +168,7 @@ def get_historical_weather(city: str, date: str) -> str:
             ),
             "timezone": "auto",
         }
-        resp = requests.get(
-            f"{OPENMETEO_BASE_URL}/archive", params=params, timeout=10
-        )
+        resp = requests.get(f"{OPENMETEO_BASE_URL}/archive", params=params, timeout=10)
         resp.raise_for_status()
         daily = resp.json()["daily"]
     except requests.RequestException as exc:
@@ -228,9 +224,7 @@ def get_forecast(city: str) -> str:
             "timezone": "auto",
             "forecast_days": METEO_FORECAST_DAYS,
         }
-        resp = requests.get(
-            f"{OPENMETEO_BASE_URL}/forecast", params=params, timeout=10
-        )
+        resp = requests.get(f"{OPENMETEO_BASE_URL}/forecast", params=params, timeout=10)
         resp.raise_for_status()
         daily = resp.json()["daily"]
     except requests.RequestException as exc:
@@ -502,7 +496,9 @@ def send_email(destinataire: str, sujet: str, contenu: str) -> str:
     email_password = os.getenv("EMAIL_APP_PASSWORD")
 
     if not email_address or not email_password:
-        return "Email non configuré. Ajoutez EMAIL_ADDRESS et EMAIL_APP_PASSWORD dans .env"
+        return (
+            "Email non configuré. Ajoutez EMAIL_ADDRESS et EMAIL_APP_PASSWORD dans .env"
+        )
 
     try:
         import smtplib

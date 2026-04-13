@@ -37,7 +37,6 @@ Règles :
   sans appeler d'outil.
 - Retiens les informations données par l'utilisateur (prénom, contexte) pour les réutiliser
   plus tard dans la conversation.""",
-
     "v2.0": """Tu es un système d'aide à la décision climatique mondial.
 Tu disposes de 7 outils que tu DOIS utiliser pour fournir des analyses argumentées et sourcées.
 
@@ -71,7 +70,9 @@ def get_prompt(version: str = None) -> str:
     """Retourne le prompt pour une version donnée."""
     v = version or CURRENT_VERSION
     if v not in PROMPTS:
-        raise ValueError(f"Version de prompt inconnue : {v}. Disponibles : {list(PROMPTS.keys())}")
+        raise ValueError(
+            f"Version de prompt inconnue : {v}. Disponibles : {list(PROMPTS.keys())}"
+        )
     return PROMPTS[v]
 
 

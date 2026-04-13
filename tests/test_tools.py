@@ -86,11 +86,13 @@ def test_send_email_no_config():
     old_addr = os.environ.pop("EMAIL_ADDRESS", None)
     old_pwd = os.environ.pop("EMAIL_APP_PASSWORD", None)
     try:
-        result = send_email.invoke({
-            "destinataire": "test@test.com",
-            "sujet": "Test",
-            "contenu": "Contenu test",
-        })
+        result = send_email.invoke(
+            {
+                "destinataire": "test@test.com",
+                "sujet": "Test",
+                "contenu": "Contenu test",
+            }
+        )
         assert "non configuré" in result.lower() or "ajoutez" in result.lower()
     finally:
         if old_addr:

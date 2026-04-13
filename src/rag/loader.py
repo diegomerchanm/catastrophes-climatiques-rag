@@ -24,7 +24,9 @@ def charger_documents(dossier: str) -> list:
         documents.extend(pages)
         print(f"  Chargé : {nom_fichier} ({len(pages)} pages)")
 
-    print(f"\nTotal : {len(fichiers_pdf)} fichiers chargés, {len(documents)} pages au total.")
+    print(
+        f"\nTotal : {len(fichiers_pdf)} fichiers chargés, {len(documents)} pages au total."
+    )
     return documents
 
 

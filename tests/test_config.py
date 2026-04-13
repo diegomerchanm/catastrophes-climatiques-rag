@@ -29,9 +29,7 @@ def test_temperature_ranges():
 
     for agent_type, config in AGENT_CONFIGS.items():
         temp = config["temperature"]
-        assert 0 <= temp <= 1, (
-            f"Température {temp} hors bornes pour '{agent_type}'"
-        )
+        assert 0 <= temp <= 1, f"Température {temp} hors bornes pour '{agent_type}'"
 
 
 def test_max_tokens_positive():
@@ -39,9 +37,7 @@ def test_max_tokens_positive():
     from src.config import AGENT_CONFIGS
 
     for agent_type, config in AGENT_CONFIGS.items():
-        assert config["max_tokens"] > 0, (
-            f"max_tokens négatif pour '{agent_type}'"
-        )
+        assert config["max_tokens"] > 0, f"max_tokens négatif pour '{agent_type}'"
 
 
 def test_get_llm_invalid_type():

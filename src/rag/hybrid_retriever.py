@@ -82,9 +82,7 @@ def rerank_documents(query: str, documents: list[Document]) -> list[Document]:
         scores = reranker.predict(pairs)
 
         # Trier par score décroissant
-        scored_docs = sorted(
-            zip(scores, documents), key=lambda x: x[0], reverse=True
-        )
+        scored_docs = sorted(zip(scores, documents), key=lambda x: x[0], reverse=True)
         reranked = [doc for _, doc in scored_docs]
 
         logger.info(
@@ -164,7 +162,9 @@ if __name__ == "__main__":
         chunks = charger_et_decouper("data/raw")
         hybrid = creer_hybrid_retriever(vector_store, chunks)
 
-        question = "Quelles sont les recommandations du rapport CELEX sur les inondations ?"
+        question = (
+            "Quelles sont les recommandations du rapport CELEX sur les inondations ?"
+        )
         print(f"\nQuestion : {question}\n")
 
         # Sans reranking
