@@ -9,7 +9,7 @@ Ne modifie pas le retriever.py de Diego, l'enveloppe par-dessus.
 
 import logging
 
-from langchain.retrievers import EnsembleRetriever
+from langchain_classic.retrievers import EnsembleRetriever
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 

@@ -93,11 +93,13 @@ async def on_message(message: cl.Message):
     session_id = cl.user_session.get("session_id")
     question = message.content
 
-    # Vérifier si l'utilisateur a uploadé des fichiers PDF
+    # Vérifier si l'utilisateur a uploadé des fichiers (PDF ou DOCX)
     if message.elements:
         for element in message.elements:
             if element.name.endswith(".pdf"):
-                await _integrer_pdf(element)
+                await _integrer_document(element, "pdf")
+            elif element.name.endswith(".docx"):
+                await _integrer_document(element, "docx")
 
         if not question or not question.strip():
             return
@@ -181,21 +183,20 @@ async def on_message(message: cl.Message):
     await msg.update()
 
 
-# ── Upload PDF dynamique ──────────────────────────────────────────────────
+# ── Upload document dynamique (PDF + DOCX) ───────────────────────────────
 
 
-async def _integrer_pdf(element) -> None:
-    """Intègre un PDF uploadé dans le corpus RAG en temps réel."""
-    logger.info("Upload PDF reçu : %s", element.name)
+async def _integrer_document(element, doc_type: str = "pdf") -> None:
+    """Intègre un PDF ou DOCX uploadé dans le corpus RAG en temps réel."""
+    logger.info("Upload %s reçu : %s", doc_type.upper(), element.name)
 
     try:
         from src.config import FAISS_STORE_PATH
         from src.rag.embeddings import charger_vector_store
         from src.rag.loader import decouper_documents
 
-        from langchain_community.document_loaders import PyPDFLoader
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        suffix = f".{doc_type}"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(
                 element.content
                 if isinstance(element.content, bytes)
@@ -203,7 +204,16 @@ async def _integrer_pdf(element) -> None:
             )
             tmp_path = tmp.name
 
-        loader = PyPDFLoader(tmp_path)
+        if doc_type == "pdf":
+            from langchain_community.document_loaders import PyPDFLoader
+            loader = PyPDFLoader(tmp_path)
+        elif doc_type == "docx":
+            from langchain_community.document_loaders import Docx2txtLoader
+            loader = Docx2txtLoader(tmp_path)
+        else:
+            await cl.Message(content=f"Format non supporté : {doc_type}").send()
+            return
+
         pages = loader.load()
         chunks = decouper_documents(pages)
 

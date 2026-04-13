@@ -9,6 +9,7 @@ faiss-cpu
 sentence-transformers
 chainlit
 pypdf
+docx2txt
 tiktoken
 tavily-python
 duckduckgo-search
