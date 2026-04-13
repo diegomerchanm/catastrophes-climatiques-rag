@@ -55,6 +55,36 @@ def interroger_rag(retriever, question: str) -> dict:
     }
 
 
+def rechercher_seuils_critiques(retriever, phenomene: str, lieu: str = None) -> dict:
+    """
+    Recherche les seuils critiques et niveaux d'alerte pour un phénomène climatique donné.
+
+    Construit une question ciblée sur les seuils et niveaux d'alerte mentionnés dans
+    les rapports scientifiques, puis délègue la recherche à interroger_rag.
+
+    Args:
+        retriever : le retriever LangChain (MMR ou autre) à utiliser pour la recherche.
+        phenomene : le phénomène climatique ciblé (ex. "canicule", "inondations", "submersion marine").
+        lieu      : région géographique optionnelle pour affiner la question (ex. "Méditerranée").
+
+    Returns:
+        dict avec les clés :
+          - 'contexte'   : contexte formaté avec citations (str)
+          - 'documents'  : liste brute des documents LangChain récupérés (list)
+    """
+    # Construction de la question de base sur les seuils critiques
+    question = (
+        f"Quels sont les seuils critiques et les niveaux d'alerte pour {phenomene} "
+        f"selon les rapports scientifiques ?"
+    )
+
+    # Ajout de la précision géographique si un lieu est fourni
+    if lieu:
+        question += f" dans la région {lieu}"
+
+    return interroger_rag(retriever, question)
+
+
 if __name__ == "__main__":
     from src.rag.embeddings import charger_vector_store
 
