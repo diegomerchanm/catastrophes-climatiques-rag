@@ -7,7 +7,6 @@ Utilise get_llm() de config.py (migration Groq → Claude)
 import logging
 from typing import TypedDict
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from src.config import get_llm
 
