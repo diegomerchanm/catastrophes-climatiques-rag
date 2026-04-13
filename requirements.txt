@@ -1,5 +1,6 @@
 langchain
 langchain-anthropic
+langchain-classic
 langchain-community
 langchain-core
 langchain-huggingface

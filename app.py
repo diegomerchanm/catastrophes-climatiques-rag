@@ -128,7 +128,14 @@ async def on_message(message: cl.Message):
         if kind == "on_chat_model_stream":
             chunk = event["data"]["chunk"]
             if hasattr(chunk, "content") and chunk.content:
-                answer += chunk.content
+                content = chunk.content
+                if isinstance(content, list):
+                    answer += "".join(
+                        c.get("text", "") if isinstance(c, dict) else str(c)
+                        for c in content
+                    )
+                else:
+                    answer += content
                 msg.content = answer
                 await msg.update()
 
