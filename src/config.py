@@ -24,10 +24,10 @@ MODEL_PRICING = {
 
 AGENT_CONFIGS = {
     "orchestrator": {
-        "model": MODEL_HAIKU,
+        "model": MODEL_SONNET,
         "temperature": 0,
-        "max_tokens": 512,
-        "description": "Décide quel sous-agent appeler selon la question",
+        "max_tokens": 2048,
+        "description": "Orchestre les outils et génère la réponse finale",
     },
     "rag": {
         "model": MODEL_SONNET,
@@ -111,9 +111,7 @@ class TokenCounter:
 
         self.total_input += input_tokens
         self.total_output += output_tokens
-        self.calls_by_agent[agent_type] = (
-            self.calls_by_agent.get(agent_type, 0) + 1
-        )
+        self.calls_by_agent[agent_type] = self.calls_by_agent.get(agent_type, 0) + 1
 
         if agent_type not in self.tokens_by_agent:
             self.tokens_by_agent[agent_type] = {"input": 0, "output": 0}
@@ -185,9 +183,31 @@ def get_llm(agent_type: str) -> ChatAnthropic:
 
 
 def get_fallback_llm() -> ChatAnthropic:
-    """LLM de secours en cas d'échec du modèle principal."""
+    """LLM de secours Anthropic (Haiku) en cas d'échec du modèle principal."""
     return ChatAnthropic(
         model=FALLBACK_MODEL,
         temperature=0.2,
         max_tokens=1024,
     )
+
+
+def get_ollama_fallback():
+    """
+    LLM de secours local via Ollama (open source, gratuit, hors ligne).
+    Nécessite Ollama installé + modèle téléchargé : ollama pull mistral
+    Utilisé quand l'API Anthropic est indisponible.
+    """
+    try:
+        import langchain_community.llms as community_llms
+
+        ollama_cls = getattr(community_llms, "Ollama")
+        return ollama_cls(
+            model="mistral",
+            temperature=0.2,
+            num_predict=1024,
+        )
+    except (ImportError, AttributeError) as exc:
+        raise EnvironmentError(
+            "Ollama non disponible. Installez langchain-community et Ollama : "
+            "pip install langchain-community && curl -fsSL https://ollama.com/install.sh | sh && ollama pull mistral"
+        ) from exc

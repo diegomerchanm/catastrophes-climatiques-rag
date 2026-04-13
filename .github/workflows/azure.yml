@@ -1,0 +1,50 @@
+name: Deploy to Azure Container Apps
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  AZURE_RESOURCE_GROUP: catastrophes-climatiques-rg
+  ACR_NAME: ragcatastrophesacr
+  CONTAINER_APP_NAME: rag-catastrophes-app
+  CONTAINER_APP_ENV: rag-catastrophes-env
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Login to Azure
+      uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Login to Azure Container Registry
+      run: |
+        az acr login --name ${{ env.ACR_NAME }}
+
+    - name: Build, tag, and push image to ACR
+      id: build-image
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build --no-cache -t ${{ env.ACR_NAME }}.azurecr.io/rag-catastrophes:$IMAGE_TAG .
+        docker push ${{ env.ACR_NAME }}.azurecr.io/rag-catastrophes:$IMAGE_TAG
+        echo "image=${{ env.ACR_NAME }}.azurecr.io/rag-catastrophes:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Deploy to Azure Container Apps
+      run: |
+        az containerapp update \
+          --name ${{ env.CONTAINER_APP_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --image ${{ steps.build-image.outputs.image }} \
+          --set-env-vars "ANTHROPIC_API_KEY=secretref:anthropic-api-key"

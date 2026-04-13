@@ -21,7 +21,9 @@ def creer_vector_store(chunks: list) -> FAISS:
     vector_store = FAISS.from_documents(chunks, embeddings)
 
     vector_store.save_local(DOSSIER_FAISS)
-    print(f"Vector store sauvegardé dans '{DOSSIER_FAISS}' ({len(chunks)} chunks indexés).")
+    print(
+        f"Vector store sauvegardé dans '{DOSSIER_FAISS}' ({len(chunks)} chunks indexés)."
+    )
 
     return vector_store
 
@@ -32,12 +34,16 @@ def charger_vector_store() -> FAISS:
     Retourne le vector store si le dossier existe, None sinon.
     """
     if not os.path.exists(DOSSIER_FAISS):
-        print(f"Erreur : le dossier '{DOSSIER_FAISS}' est introuvable. Veuillez d'abord créer le vector store.")
+        print(
+            f"Erreur : le dossier '{DOSSIER_FAISS}' est introuvable. Veuillez d'abord créer le vector store."
+        )
         return None
 
     print(f"Chargement du vector store depuis '{DOSSIER_FAISS}'...")
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    vector_store = FAISS.load_local(DOSSIER_FAISS, embeddings, allow_dangerous_deserialization=True)
+    vector_store = FAISS.load_local(
+        DOSSIER_FAISS, embeddings, allow_dangerous_deserialization=True
+    )
     print("Vector store chargé avec succès.")
     return vector_store
 
