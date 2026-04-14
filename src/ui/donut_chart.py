@@ -7,7 +7,17 @@ les inactifs sont grises. Les pourcentages changent dynamiquement.
 import math
 
 # Toutes les categories du systeme (toujours presentes dans le donut)
-ALL_CATEGORIES = ["RAG", "Meteo", "Web", "Calcul", "ML", "Scoring", "Email", "Agent", "Chat"]
+ALL_CATEGORIES = [
+    "RAG",
+    "Meteo",
+    "Web",
+    "Calcul",
+    "ML",
+    "Scoring",
+    "Email",
+    "Agent",
+    "Chat",
+]
 
 # Couleurs actives
 TOOL_COLORS = {
@@ -44,8 +54,11 @@ TOOL_CATEGORIES = {
     "web_search": "Web",
     "calculator": "Calcul",
     "predict_risk": "ML",
+    "predict_risk_by_type": "ML",
     "calculer_score_risque": "Scoring",
     "send_email": "Email",
+    "send_bulk_email": "Email",
+    "list_corpus": "RAG",
     "__agent__": "Agent",
 }
 
@@ -93,10 +106,10 @@ def generer_message_avec_donut(
         else:
             parts.append((cat, part_inactive, False))
 
-    # Generer le SVG
-    size = 160
-    cx, cy = 80, 80
-    r, r_inner = 65, 40
+    # Generer le SVG (+50%)
+    size = 240
+    cx, cy = 120, 120
+    r, r_inner = 97, 60
 
     start_angle = -90
     arcs = ""
@@ -152,9 +165,9 @@ def generer_message_avec_donut(
         f'fill="none" stroke="#f3f4f6" stroke-width="1"/>'
         f"<g>{arcs}</g>"
         f'<text x="{cx}" y="{cy - 2}" text-anchor="middle" '
-        f'font-size="18" font-weight="bold" fill="#1f2937" '
+        f'font-size="24" font-weight="bold" fill="#1f2937" '
         f'font-family="Inter, sans-serif">{center_text}</text>'
-        f'<text x="{cx}" y="{cy + 14}" text-anchor="middle" '
+        f'<text x="{cx}" y="{cy + 18}" text-anchor="middle" '
         f'font-size="10" fill="#6b7280" '
         f'font-family="Inter, sans-serif">{sub_text}</text>'
         f"</svg>"
@@ -187,7 +200,7 @@ def generer_message_avec_donut(
     if sources:
         sources_html = (
             '<div style="margin-top:10px;padding-top:8px;'
-            'border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;">'
+            'border-top:1px solid #374151;font-size:12px;color:#1f2937;">'
             "<b>Sources :</b><br>"
         )
         for src_item in sources[:5]:
@@ -199,7 +212,7 @@ def generer_message_avec_donut(
     if tokens_info:
         tokens_html = (
             f'<div style="margin-top:6px;font-size:11px;'
-            f'color:#9ca3af;font-style:italic;">{tokens_info}</div>'
+            f'color:#374151;font-style:italic;">{tokens_info}</div>'
         )
 
     # Conversion markdown basique -> HTML
@@ -209,12 +222,33 @@ def generer_message_avec_donut(
     # Bold **text** -> <b>text</b>
     answer_html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", answer_html)
     # Italic *text* -> <i>text</i>
-    answer_html = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", answer_html)
+    answer_html = re.sub(
+        r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", answer_html
+    )
     # Lists - item -> bullet
     answer_html = re.sub(r"^- (.+)$", r"&bull; \1", answer_html, flags=re.MULTILINE)
-    # Headers ### -> bold
-    answer_html = re.sub(r"^###\s*(.+)$", r"<b>\1</b>", answer_html, flags=re.MULTILINE)
-    answer_html = re.sub(r"^##\s*(.+)$", r"<b style='font-size:1.1em'>\1</b>", answer_html, flags=re.MULTILINE)
+    # Headers # ## ### #### -> bold (ordre decroissant, tolerant au whitespace leading)
+    answer_html = re.sub(
+        r"^[ \t]*####\s+(.+?)\s*$", r"<b>\1</b>", answer_html, flags=re.MULTILINE
+    )
+    answer_html = re.sub(
+        r"^[ \t]*###\s+(.+?)\s*$",
+        r"<b style='font-size:1.05em'>\1</b>",
+        answer_html,
+        flags=re.MULTILINE,
+    )
+    answer_html = re.sub(
+        r"^[ \t]*##\s+(.+?)\s*$",
+        r"<b style='font-size:1.15em'>\1</b>",
+        answer_html,
+        flags=re.MULTILINE,
+    )
+    answer_html = re.sub(
+        r"^[ \t]*#\s+(.+?)\s*$",
+        r"<b style='font-size:1.25em'>\1</b>",
+        answer_html,
+        flags=re.MULTILINE,
+    )
     # Newlines -> <br>
     answer_html = answer_html.replace("\n", "<br>")
 

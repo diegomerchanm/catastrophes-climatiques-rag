@@ -82,8 +82,7 @@ def call_model(state: AgentState) -> AgentState:
         now = datetime.now().strftime("%A %d %B %Y, %H:%M (heure locale)")
 
         prompt_with_time = (
-            AGENT_SYSTEM_PROMPT
-            + f"\n\nDate et heure actuelles : {now}. "
+            AGENT_SYSTEM_PROMPT + f"\n\nDate et heure actuelles : {now}. "
             "Adapte tes reponses au contexte temporel "
             "(jour/nuit, saison, jour de la semaine). "
             "Si l'utilisateur te donne son email ou son prenom, retiens-le "
@@ -207,14 +206,48 @@ def run_agent(question: str, chat_history: list[BaseMessage] | None = None) -> s
     return answer
 
 
+def _git_commit_short() -> str:
+    """Retourne le SHA court du commit courant, ou var env GITHUB_SHA, ou 'unknown'."""
+    try:
+        import subprocess
+
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        import os as _os
+
+        return _os.getenv("GITHUB_SHA", "unknown")[:7]
+
+
 def _log_mlflow(question: str, answer: str, outils: list, duree: float) -> None:
     """Tracke une prédiction dans MLflow si disponible."""
     try:
+        import os
         import mlflow
 
-        mlflow.set_experiment("rag-catastrophes-climatiques")
+        tracking_uri = os.getenv("MLFLOW_TRACKING_URI") or "sqlite:///mlflow.db"
+        mlflow.set_tracking_uri(tracking_uri)
+
+        env_label = os.getenv("ENV_LABEL") or (
+            "prod" if os.getenv("AZURE_CONTAINER_APP") else "local"
+        )
+        mlflow.set_experiment(
+            os.getenv("MLFLOW_EXPERIMENT_AGENT") or "rag-catastrophes-climatiques"
+        )
 
         with mlflow.start_run(run_name=question[:50], nested=True):
+            # Tags (traçabilite code + env)
+            mlflow.set_tags(
+                {
+                    "git_commit": _git_commit_short(),
+                    "env": env_label,
+                    "prompt_version": PROMPT_VERSION,
+                }
+            )
+
             # Paramètres
             mlflow.log_param("prompt_version", PROMPT_VERSION)
             mlflow.log_param("question", question[:250])

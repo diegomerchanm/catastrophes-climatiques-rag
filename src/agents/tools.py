@@ -169,7 +169,9 @@ def get_historical_weather(city: str, date: str) -> str:
             "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
             "timezone": "auto",
         }
-        resp = requests.get("https://archive-api.open-meteo.com/v1/archive", params=params, timeout=10)
+        resp = requests.get(
+            "https://archive-api.open-meteo.com/v1/archive", params=params, timeout=10
+        )
         resp.raise_for_status()
         data = resp.json()
         daily = data["daily"]
@@ -591,7 +593,9 @@ def send_bulk_email(destinataires: str, sujet: str, contenu: str) -> str:
 
     # Parser les destinataires
     dest_lower = destinataires.lower()
-    if any(kw in dest_lower for kw in ["equipe", "team", "tous", "tout le monde", "all"]):
+    if any(
+        kw in dest_lower for kw in ["equipe", "team", "tous", "tout le monde", "all"]
+    ):
         emails = TEAM_EMAILS
     else:
         # Resoudre les noms en emails via le repertoire
@@ -645,89 +649,214 @@ def send_bulk_email(destinataires: str, sujet: str, contenu: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
-# OUTIL 8 — Prédiction ML du risque catastrophe (modèle EM-DAT)
+# OUTIL 8 — Prédiction ML du risque catastrophe (modèle EM-DAT multi-type)
 # ══════════════════════════════════════════════════════════════════
 
-_cached_predictions = None
+_cached_predictions_country = None
+_cached_predictions_detail = None
+
+CLIMATE_TYPES = [
+    "drought",
+    "flood",
+    "extreme_weather",
+    "extreme_temperature",
+    "wildfire",
+]
 
 
 def _load_predictions() -> dict | None:
-    """Charge les prédictions d'impact 2030 pré-calculées (NB10)."""
-    global _cached_predictions
-    if _cached_predictions is not None:
-        return _cached_predictions
+    """Charge les prédictions agrégées par pays (NB10)."""
+    global _cached_predictions_country
+    if _cached_predictions_country is not None:
+        return _cached_predictions_country
 
-    predictions_path = os.path.join("outputs", "NB10_predictions_2030.csv")
-    if not os.path.exists(predictions_path):
-        logger.warning("Prédictions ML non trouvées : %s", predictions_path)
+    path = os.path.join("outputs", "NB10_predictions_2030_country.csv")
+    if not os.path.exists(path):
+        logger.warning("Prédictions ML non trouvées : %s", path)
         return None
 
     import csv
 
-    _cached_predictions = {}
-    with open(predictions_path, encoding="utf-8") as f:
+    _cached_predictions_country = {}
+    with open(path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            _cached_predictions[row["country"].lower()] = {
+            _cached_predictions_country[row["country"].lower()] = {
                 "country": row["country"],
                 "continent": row["continent"],
-                "deaths_pred": float(row["deaths_pred"]),
+                "impact_pred": float(row["impact_pred"]),
+            }
+    logger.info(
+        "Prédictions ML (agrégat) chargées : %d pays",
+        len(_cached_predictions_country),
+    )
+    return _cached_predictions_country
+
+
+def _load_predictions_detail() -> dict | None:
+    """Charge les prédictions détaillées par (pays, type) (NB10)."""
+    global _cached_predictions_detail
+    if _cached_predictions_detail is not None:
+        return _cached_predictions_detail
+
+    path = os.path.join("outputs", "NB10_predictions_2030_detail.csv")
+    if not os.path.exists(path):
+        logger.warning("Prédictions ML détaillées non trouvées : %s", path)
+        return None
+
+    import csv
+
+    _cached_predictions_detail = {}
+    with open(path, encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            key = row["country"].lower()
+            if key not in _cached_predictions_detail:
+                _cached_predictions_detail[key] = {
+                    "country": row["country"],
+                    "continent": row["continent"],
+                    "types": {},
+                }
+            _cached_predictions_detail[key]["types"][row["disaster_type"]] = {
+                "impact_pred": float(row["impact_pred"]),
                 "risk_pred": row["risk_pred"],
             }
-    logger.info("Prédictions ML chargées : %d pays", len(_cached_predictions))
-    return _cached_predictions
+    logger.info(
+        "Prédictions ML (détail) chargées : %d pays × %d types",
+        len(_cached_predictions_detail),
+        len(CLIMATE_TYPES),
+    )
+    return _cached_predictions_detail
+
+
+def _resolve_country(country: str, predictions: dict) -> str | None:
+    """Résout un nom de pays (tolère casse et correspondance partielle)."""
+    key = country.strip().lower()
+    if key in predictions:
+        return key
+    matches = [k for k in predictions if key in k or k in key]
+    return matches[0] if matches else None
 
 
 @tool
 def predict_risk(country: str) -> str:
     """
-    Prédit le niveau d'exposition aux catastrophes climatiques pour un pays,
-    basé sur un modèle ML entraîné sur les données EM-DAT (1900-2020).
-    Retourne l'impact humain moyen annuel prédit pour la décennie 2030
-    et le niveau de risque.
+    Prédit l'impact humain agrégé des catastrophes climatiques pour un pays
+    à l'horizon 2030, avec le détail par type (sécheresse, inondation,
+    tempête, canicule, feux de forêt). Basé sur un modèle ML entraîné sur
+    les données EM-DAT (1900-2020) en format multi-type, enrichi d'une
+    variable exogène de réchauffement global (NASA GISS).
 
     Args:
-        country: Nom du pays en anglais (ex: "France", "India", "Bangladesh")
+        country: Nom du pays en anglais (ex: "France", "India", "Bangladesh").
 
     Returns:
-        Prédiction : impact humain moyen/an, niveau de risque, continent.
+        Prédiction : impact total 2030 + détail par type de catastrophe
+        climatique + niveau de risque associé.
     """
     logger.info("Appel predict_risk pour %s", country)
-    predictions = _load_predictions()
+    agg = _load_predictions()
+    detail = _load_predictions_detail()
 
-    if predictions is None:
+    if agg is None or detail is None:
         return (
             "Modèle ML non disponible. Lancez d'abord le notebook NB10 "
-            "pour générer les prédictions (outputs/NB10_predictions_2030.csv)."
+            "pour générer outputs/NB10_predictions_2030_country.csv "
+            "et outputs/NB10_predictions_2030_detail.csv."
         )
 
-    key = country.strip().lower()
-    if key not in predictions:
-        # Recherche approximative
-        matches = [k for k in predictions if key in k or k in key]
-        if matches:
-            key = matches[0]
-        else:
-            pays_dispo = ", ".join(
-                sorted(set(p["country"] for p in predictions.values()))[:20]
-            )
-            return (
-                f"Pays « {country} » non trouvé dans les prédictions ML. "
-                f"Exemples disponibles : {pays_dispo}..."
+    key = _resolve_country(country, agg)
+    if key is None:
+        pays_dispo = ", ".join(sorted(set(p["country"] for p in agg.values()))[:20])
+        return (
+            f"Pays « {country} » non trouvé dans les prédictions ML. "
+            f"Exemples disponibles : {pays_dispo}..."
+        )
+
+    pred = agg[key]
+    types_data = detail.get(key, {}).get("types", {})
+
+    lines = [
+        f"Prédiction ML 2030 pour {pred['country']} ({pred['continent']})",
+        f"- Impact total (tous types climatiques) : {pred['impact_pred']:.0f} décès/an",
+        "- Détail par type :",
+    ]
+    for typ in CLIMATE_TYPES:
+        if typ in types_data:
+            t = types_data[typ]
+            lines.append(
+                f"    {typ:<22} {t['impact_pred']:>8.0f} décès/an "
+                f"(risque : {t['risk_pred']})"
             )
 
-    pred = predictions[key]
-    niveau = pred["risk_pred"]
-    victimes = pred["deaths_pred"]
+    lines.append(
+        "- Source : modèle sklearn multi-type (5 types climatiques) entraîné "
+        "sur EM-DAT 1900-2020, avec feature exogène NASA GISS (réchauffement)."
+    )
+    lines.append(
+        "- Limite : prédiction statistique, ne tient pas compte des politiques "
+        "d'adaptation ni des projections climatiques physiques."
+    )
+    return "\n".join(lines)
+
+
+@tool
+def predict_risk_by_type(country: str, disaster_type: str) -> str:
+    """
+    Prédit l'impact humain d'un type spécifique de catastrophe climatique
+    pour un pays à l'horizon 2030. Utile pour répondre aux questions
+    ciblées du style « quel est le risque d'inondation au Bangladesh ? ».
+
+    Args:
+        country: Nom du pays en anglais (ex: "Bangladesh").
+        disaster_type: Type de catastrophe parmi drought, flood,
+            extreme_weather, extreme_temperature, wildfire.
+
+    Returns:
+        Impact prédit 2030 pour ce type, niveau de risque, comparaison
+        avec les autres types climatiques du pays.
+    """
+    logger.info("Appel predict_risk_by_type %s / %s", country, disaster_type)
+    detail = _load_predictions_detail()
+
+    if detail is None:
+        return (
+            "Modèle ML non disponible. Lancez d'abord le notebook NB10 "
+            "pour générer outputs/NB10_predictions_2030_detail.csv."
+        )
+
+    typ = disaster_type.strip().lower().replace(" ", "_")
+    if typ not in CLIMATE_TYPES:
+        return (
+            f"Type « {disaster_type} » non reconnu. "
+            f"Types disponibles : {', '.join(CLIMATE_TYPES)}."
+        )
+
+    key = _resolve_country(country, detail)
+    if key is None:
+        return f"Pays « {country} » non trouvé dans les prédictions ML."
+
+    pays_data = detail[key]
+    if typ not in pays_data["types"]:
+        return f"Pas de prédiction disponible pour {typ} en {pays_data['country']}."
+
+    t = pays_data["types"][typ]
+    # Ranking du type parmi les autres types du pays
+    tous = sorted(
+        pays_data["types"].items(),
+        key=lambda x: x[1]["impact_pred"],
+        reverse=True,
+    )
+    rang = [i for i, (nom, _) in enumerate(tous) if nom == typ][0] + 1
 
     return (
-        f"Prédiction ML 2030 pour {pred['country']} ({pred['continent']})\n"
-        f"- Victimes moyennes annuelles prédites : {victimes:.0f}\n"
-        f"- Niveau d'exposition : {niveau}\n"
-        f"- Source : modèle entraîné sur EM-DAT (1900-2020), "
-        f"pipeline sklearn (régression + classification)\n"
-        f"- Limite : prédiction statistique basée sur les tendances passées, "
-        f"ne tient pas compte des politiques d'adaptation"
+        f"Prédiction ML 2030 — {typ} en {pays_data['country']} "
+        f"({pays_data['continent']})\n"
+        f"- Impact prédit : {t['impact_pred']:.0f} décès/an\n"
+        f"- Niveau de risque : {t['risk_pred']}\n"
+        f"- Rang dans le pays : {rang}/{len(tous)} types climatiques\n"
+        f"- Source : modèle multi-type EM-DAT 1900-2020 + exogène "
+        f"réchauffement NASA GISS."
     )
 
 
@@ -871,7 +1000,8 @@ def list_corpus() -> str:
         return "Le dossier corpus (data/raw/) n'existe pas."
 
     files = sorted(
-        f for f in os.listdir(corpus_dir)
+        f
+        for f in os.listdir(corpus_dir)
         if f.lower().endswith((".pdf", ".docx", ".txt"))
     )
 
@@ -901,6 +1031,7 @@ ALL_TOOLS = [
     send_email,
     send_bulk_email,
     predict_risk,
+    predict_risk_by_type,
     calculer_score_risque,
     list_corpus,
 ]
