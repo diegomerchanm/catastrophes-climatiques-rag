@@ -7,3 +7,13 @@ __pycache__/
 venv/
 venv311/
 *.egg-info/
+
+# Artefacts ML regeneres en CI (voir scripts/train_nb10.py)
+outputs/NB10_*.joblib
+outputs/NB10_predictions_2030_*.csv
+mlruns/
+mlflow.db
+outputs/NB10_mlflow_*_grid.csv
+
+# Etat local Chainlit (ne jamais committer)
+data/chainlit.db

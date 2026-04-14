@@ -60,6 +60,25 @@ jobs:
         run: |
           docker login -u $DOCKER_USER -p $DOCKER_PASSWORD
 
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies for training
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Train ML models (regenerate joblib artifacts)
+        run: |
+          python scripts/train_nb10.py
+
+      - name: Verify artifacts were created
+        run: |
+          ls -la outputs/NB10_*.joblib
+          ls -la outputs/NB10_predictions_2030_*.csv
+
       - name: Get current date
         id: date
         run: echo "date=$(date +'%Y-%m-%d--%H-%M-%S')" >> $GITHUB_OUTPUT
