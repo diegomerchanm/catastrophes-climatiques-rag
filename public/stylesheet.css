@@ -1,0 +1,12 @@
+/* SAEARCH DooMax — Fond image */
+
+body,
+html,
+#root,
+#root > div,
+main {
+    background:
+        linear-gradient(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.5)),
+        url('/public/background.jpg') no-repeat center center fixed !important;
+    background-size: cover !important;
+}

@@ -29,26 +29,82 @@ CLASSIFIER_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """Tu es un routeur de questions. Analyse la question et réponds UNIQUEMENT par un seul mot :
-- "rag" si la question porte sur les catastrophes climatiques, le réchauffement, les événements météo extrêmes, ou tout sujet scientifique environnemental
-- "agent" si la question demande la météo actuelle, une recherche web récente, ou un calcul mathématique précis
-- "chat" pour toute autre conversation générale (salutations, opinions, questions hors-sujet)
+            """Tu es un routeur de questions. Analyse la question et reponds UNIQUEMENT par un seul mot :
+- "rag" si la question porte sur les catastrophes climatiques, le rechauffement, les evenements meteo extremes, le GIEC, Copernicus, EM-DAT, le corpus, les documents scientifiques, les rapports, ou tout sujet environnemental
+- "agent" si la question demande une ACTION : meteo, previsions, recherche web, calcul, envoi d'email, prediction de risque, score de risque, analyse, ou toute tache necessitant un outil
+- "chat" UNIQUEMENT pour les salutations simples (bonjour, merci, au revoir) ou les questions sur l'identite du systeme
+
+EN CAS DE DOUTE, reponds "agent".
 
 Exemples :
-- "Bonjour" → chat
-- "Quelle est la météo à Paris ?" → agent
-- "Calcule 3+7" → agent
-- "Que dit le GIEC sur les inondations ?" → rag
-- "Quelles catastrophes en 2023 ?" → rag
+- "Bonjour" -> chat
+- "Qui es-tu ?" -> chat
+- "Quelle est la meteo a Paris ?" -> agent
+- "Calcule 3+7" -> agent
+- "Envoie un email" -> agent
+- "Donne-moi les news" -> agent
+- "Quel risque a Nice ?" -> agent
+- "Que dit le GIEC sur les inondations ?" -> rag
+- "Quelles catastrophes en 2023 ?" -> rag
+- "Liste les documents du corpus" -> rag
+- "Combien de documents" -> rag
+- "Quels rapports sont disponibles" -> rag
 
-Ne réponds que par un seul mot : rag, agent, ou chat""",
+Ne reponds que par un seul mot : rag, agent, ou chat""",
         ),
         ("human", "{question}"),
     ]
 )
 
 
+AGENT_KEYWORDS = [
+    "email", "mail", "envoie", "envoyer", "meteo", "météo", "temps",
+    "prevision", "prévision", "forecast", "calcul", "combien",
+    "recherche", "cherche", "news", "actualit", "web",
+    "risque", "predict", "score", "alerte",
+    "pdf", "inventaire", "fichier",
+    "temperature", "température", "moyenne", "historique",
+    "precipit", "vent", "humidite", "humidité", "pression",
+]
+
+
+RAG_KEYWORDS = [
+    "corpus", "document", "rapport", "giec", "ipcc", "copernicus",
+    "em-dat", "emdat", "catastrophe", "climatique", "inondation",
+    "secheresse", "incendie", "cyclone", "ouragan",
+]
+
+
+# Mots-cles qui forcent agent meme si un mot RAG est present
+AGENT_PRIORITY = [
+    "recherche", "cherche", "news", "actualit", "web",
+    "email", "mail", "envoie", "envoyer", "calcul", "combien",
+    "meteo", "météo", "prevision", "prévision", "forecast",
+    "temperature", "température", "historique",
+]
+
+
 def classify_question(state: RouterState) -> RouterState:
+    question_lower = state["question"].lower()
+
+    # Mots-cles agent prioritaires (recherche web, email, meteo...)
+    for kw in AGENT_PRIORITY:
+        if kw in question_lower:
+            logger.info("Mot-cle prioritaire '%s' detecte -> route agent", kw)
+            return {**state, "route": "agent"}
+
+    # Detection rapide par mots-cles -> force "rag"
+    for kw in RAG_KEYWORDS:
+        if kw in question_lower:
+            logger.info("Mot-cle '%s' detecte -> route rag", kw)
+            return {**state, "route": "rag"}
+
+    # Detection rapide par mots-cles -> force "agent"
+    for kw in AGENT_KEYWORDS:
+        if kw in question_lower:
+            logger.info("Mot-cle '%s' detecte -> route agent", kw)
+            return {**state, "route": "agent"}
+
     llm = get_llm("orchestrator")
     chain = CLASSIFIER_PROMPT | llm
     result = chain.invoke({"question": state["question"]})
@@ -142,9 +198,11 @@ CHAT_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """Tu es un assistant conversationnel sympathique et concis.
-Tu te souviens de ce qui a été dit dans la conversation.
-Réponds toujours en français.""",
+            """Tu es DooMax, l'IA du systeme SAEARCH. Tu ne t'appelles jamais Claude.
+Tu ne mets JAMAIS d'emojis dans tes reponses. Ton ton est professionnel et concis.
+Tu te souviens de ce qui a ete dit dans la conversation.
+Reponds toujours en francais.
+Date et heure actuelles : {current_time}. Adapte tes reponses au contexte temporel.""",
         ),
         ("placeholder", "{history}"),
         ("human", "{question}"),
@@ -153,10 +211,17 @@ Réponds toujours en français.""",
 
 
 def chat_node(state: RouterState) -> RouterState:
+    from datetime import datetime
+
     llm = get_llm("chat")
     chain = CHAT_PROMPT | llm
+    now = datetime.now().strftime("%A %d %B %Y, %H:%M (heure locale)")
     result = chain.invoke(
-        {"question": state["question"], "history": state.get("history", [])}
+        {
+            "question": state["question"],
+            "history": state.get("history", []),
+            "current_time": now,
+        }
     )
     logger.info("Chat : réponse directe générée")
     return {**state, "answer": result.content, "sources": []}

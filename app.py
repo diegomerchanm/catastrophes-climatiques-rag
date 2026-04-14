@@ -12,10 +12,16 @@ import os
 import tempfile
 
 import chainlit as cl
+import chainlit.data as cl_data
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src.agents.agent import get_agent, get_prompt_version, get_token_summary
+from src.ui.donut_chart import generer_message_avec_donut
+from src.ui.data_layer import SQLiteDataLayer
+
+# Activer le data layer SQLite pour la sidebar
+cl_data._data_layer = SQLiteDataLayer()
 from src.memory.memory import add_exchange, get_session_history
 from src.router.router import (
     RAG_PROMPT,
@@ -54,15 +60,17 @@ TOOL_BADGES = {
 }
 
 
-def _detecter_outils_appeles(messages: list) -> tuple[set, list]:
+def _detecter_outils_appeles(messages: list) -> tuple[set, list, list]:
     """Detecte les outils appeles et les sources RAG dans les messages de l'agent."""
     outils = set()
+    outils_bruts = []
     sources = []
 
     for msg in messages:
         if isinstance(msg, AIMessage) and msg.tool_calls:
             for tc in msg.tool_calls:
                 nom = tc["name"]
+                outils_bruts.append(nom)
                 if nom in TOOL_BADGES:
                     outils.add(TOOL_BADGES[nom])
 
@@ -71,7 +79,31 @@ def _detecter_outils_appeles(messages: list) -> tuple[set, list]:
                 if "[Source:" in ligne and ligne.strip() not in sources:
                     sources.append(ligne.strip())
 
-    return outils, sources
+    return outils, sources, outils_bruts
+
+
+# ── Authentification ──────────────────────────────────────────────────────
+
+
+@cl.password_auth_callback
+def auth_callback(username: str, password: str):
+    """Authentification simple par mot de passe."""
+    # Utilisateurs autorises (en prod, utiliser une base de donnees)
+    users = {
+        "xiabizot@gmail.com": {"password": "saearch", "name": "Xia", "role": "admin"},
+        "kamilakare@gmail.com": {"password": "prof2026", "name": "Kamila", "role": "admin"},
+        "diegomerchanm@gmail.com": {"password": "saearch", "name": "Diego", "role": "user"},
+        "jaysonphannguyenpro@gmail.com": {"password": "saearch", "name": "Jayson", "role": "user"},
+        "camille.koenig@gmail.com": {"password": "saearch", "name": "Camille", "role": "user"},
+        "demo@saearch.ai": {"password": "demo", "name": "Demo", "role": "user"},
+    }
+    user = users.get(username.lower())
+    if user and user["password"] == password:
+        return cl.User(
+            identifier=user["name"],
+            metadata={"email": username, "role": user["role"]},
+        )
+    return None
 
 
 # ── Initialisation de la session ──────────────────────────────────────────
@@ -82,26 +114,47 @@ async def on_chat_start():
     """Initialise une nouvelle session de chat."""
     session_id = cl.user_session.get("id", "default")
     cl.user_session.set("session_id", session_id)
-    logger.info("Nouvelle session Chainlit : %s", session_id)
 
-    await cl.Message(
-        content=(
-            "**Assistant Catastrophes Climatiques -- SAEARCH**\n\n"
-            "Je peux :\n"
-            "- Repondre a vos questions sur le corpus scientifique "
-            "(GIEC, Copernicus, EM-DAT...)\n"
-            "- Consulter la meteo actuelle, historique ou les previsions\n"
-            "- Effectuer des calculs\n"
-            "- Rechercher des actualites sur le web\n"
-            "- Predire le risque climatique par pays (modele ML)\n"
-            "- Calculer un score de risque agrege multi-sources\n"
-            "- Croiser toutes ces sources pour une analyse de risque\n"
-            "- Envoyer des alertes par email\n"
-            "- Accepter des documents PDF/DOCX pour enrichir le corpus\n"
-            "- Comprendre les messages vocaux\n\n"
-            "Comment puis-je vous aider ?"
-        )
-    ).send()
+    # Recuperer l'utilisateur connecte
+    user = cl.user_session.get("user")
+    user_name = user.identifier if user else "utilisateur"
+    user_email = user.metadata.get("email", "") if user else ""
+    cl.user_session.set("user_email", user_email)
+
+    # Geolocalisation par IP (une seule fois au login)
+    user_location = ""
+    try:
+        import requests as _req
+
+        geo = _req.get("http://ip-api.com/json/?lang=fr", timeout=5).json()
+        if geo.get("status") == "success":
+            city = geo.get("city", "")
+            country = geo.get("country", "")
+            region = geo.get("regionName", "")
+            lat = geo.get("lat", "")
+            lon = geo.get("lon", "")
+            user_location = f"{city}, {region}, {country} ({lat}, {lon})"
+            logger.info("Geolocalisation : %s", user_location)
+    except Exception as exc:
+        logger.warning("Geolocalisation echouee : %s", exc)
+    cl.user_session.set("user_location", user_location)
+    logger.info(
+        "Nouvelle session Chainlit : %s (user: %s)", session_id, user_name
+    )
+
+    # Donut d'accueil personnalise
+    greeting = f"Bonjour <b>{user_name}</b>" if user else "Bonjour"
+    donut_accueil = generer_message_avec_donut(
+        answer=(
+            f"{greeting}, je suis <b>DooMax</b>, ton IA dans <b>SAEARCH</b>, "
+            "le Systeme Agentique d'Evaluation et d'Anticipation "
+            "des Risques Climatiques et Hydrologiques.<br><br>"
+            "Comment puis-je t'aider ?"
+        ),
+        outils_appeles=[],
+        route="chat",
+    )
+    await cl.Message(content=donut_accueil).send()
 
 
 # ── Traitement des messages texte + fichiers ──────────────────────────────
@@ -110,86 +163,194 @@ async def on_chat_start():
 @cl.on_message
 async def on_message(message: cl.Message):
     """Traite un message utilisateur : routing, streaming, badges, monitoring."""
-    session_id = cl.user_session.get("session_id")
-    question = message.content
+    try:
+        logger.info("Message recu : %s", message.content[:50])
+        session_id = cl.user_session.get("session_id")
+        question = message.content
+    except Exception as exc:
+        logger.error("CRASH DEBUT on_message : %s", exc)
+        await cl.Message(content=f"Erreur : {exc}").send()
+        return
 
-    # Upload PDF ou DOCX
+    # Upload fichiers (PDF, DOCX, images)
+    image_data = None
+    doc_text = ""
     if message.elements:
         for element in message.elements:
             if element.name.endswith(".pdf"):
                 await _integrer_document(element, "pdf")
+                # Extraire le texte pour l'envoyer au LLM
+                extracted = await _extraire_texte(element, "pdf")
+                if extracted:
+                    doc_text += f"\n\n[Contenu du document {element.name}]\n{extracted}"
             elif element.name.endswith(".docx"):
                 await _integrer_document(element, "docx")
+                extracted = await _extraire_texte(element, "docx")
+                if extracted:
+                    doc_text += f"\n\n[Contenu du document {element.name}]\n{extracted}"
+            elif element.name.endswith(".txt"):
+                try:
+                    txt_bytes = (
+                        element.content
+                        if isinstance(element.content, bytes)
+                        else open(element.path, "rb").read()
+                    )
+                    texte = txt_bytes.decode("utf-8", errors="ignore")[:5000]
+                    doc_text += f"\n\n[Contenu du fichier {element.name}]\n{texte}"
+                    logger.info("TXT recu : %s (%d car)", element.name, len(texte))
+                except Exception as exc:
+                    logger.error("Erreur lecture TXT : %s", exc)
+            elif element.name.endswith(".doc"):
+                extracted = await _extraire_texte(element, "docx")
+                if extracted:
+                    doc_text += f"\n\n[Contenu du document {element.name}]\n{extracted}"
+            elif element.name.lower().endswith(
+                (".png", ".jpg", ".jpeg", ".gif", ".webp")
+            ):
+                import base64
+
+                img_bytes = (
+                    element.content
+                    if isinstance(element.content, bytes)
+                    else open(element.path, "rb").read()
+                )
+                img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+                ext = element.name.rsplit(".", 1)[-1].lower()
+                mime = {
+                    "png": "image/png",
+                    "jpg": "image/jpeg",
+                    "jpeg": "image/jpeg",
+                    "gif": "image/gif",
+                    "webp": "image/webp",
+                }.get(ext, "image/png")
+                image_data = {"base64": img_b64, "mime": mime}
+                logger.info("Image recue : %s (%s)", element.name, mime)
+
+        # Enrichir la question avec le texte du document
+        if doc_text:
+            if not question or not question.strip():
+                question = "Resume ce document."
+            question = question + doc_text
 
         if not question or not question.strip():
-            return
+            if image_data:
+                question = "Decris cette image."
+            else:
+                return
 
     # Recuperer l'historique de la session
     history = get_session_history(session_id)
     chat_history = history.messages
 
-    # Etape 1 : classifier la question via le router de Jayson (P3)
-    state = RouterState(
-        question=question,
-        route="",
-        answer="",
-        sources=[],
-        history=chat_history,
-    )
-    state = classify_question(state)
-    route = state["route"]
-    logger.info("Route detectee : %s", route)
+    # Si image uploadee, forcer route agent (multimodal)
+    if image_data:
+        route = "agent"
+        logger.info("Image detectee -> route agent (multimodal)")
+    else:
+        # Etape 1 : classifier la question via le router de Jayson (P3)
+        try:
+            state = RouterState(
+                question=question,
+                route="",
+                answer="",
+                sources=[],
+                history=chat_history,
+            )
+            state = classify_question(state)
+            route = state["route"]
+            logger.info("Route detectee : %s", route)
+        except Exception as exc:
+            logger.error("Erreur classification : %s — fallback chat", exc)
+            route = "chat"
 
     # Afficher le badge de route en debut de message (pattern P3)
     badge = ROUTE_LABELS.get(route, "")
-    msg = cl.Message(content=f"**{badge}**\n\n")
-    await msg.send()
+    try:
+        msg = cl.Message(content=f"**{badge}**\n\n")
+        await msg.send()
 
-    answer = ""
-    sources = []
-    agent_outils = set()
+        answer = ""
+        sources = []
+        agent_outils = set()
+        outils_bruts = []
 
-    # Etape 2 : traitement selon la route
-    if route == "rag":
-        # Streaming RAG token par token (pattern P3 — chain.astream)
-        answer, sources = await _handle_rag(msg, question)
+        # Etape 2 : traitement selon la route
+        if route == "rag":
+            answer, sources = await _handle_rag(msg, question)
+            outils_bruts = ["search_corpus"]
+        elif route == "agent":
+            # Injecter le contexte utilisateur (prenom + email + localisation)
+            user = cl.user_session.get("user")
+            user_name = user.identifier if user else ""
+            user_email = cl.user_session.get("user_email", "")
+            user_location = cl.user_session.get("user_location", "")
+            ctx_parts = []
+            if user_name:
+                ctx_parts.append(
+                    f"le profil connecte est {user_name}, mais si l'utilisateur "
+                    "a donne un autre prenom dans la conversation, utilise celui-la"
+                )
+            if user_email and any(kw in question.lower() for kw in ["email", "mail", "envoie", "envoyer", "rappel"]):
+                ctx_parts.append(
+                    f"son adresse email est {user_email}"
+                )
+            if user_location:
+                ctx_parts.append(
+                    f"il se trouve a {user_location}. "
+                    "Utilise cette ville par defaut pour la meteo"
+                )
+            if ctx_parts:
+                question_enrichie = (
+                    f"{question}\n[Info systeme: {'; '.join(ctx_parts)}]"
+                )
+            else:
+                question_enrichie = question
+            answer, agent_outils, sources, outils_bruts = await _handle_agent(
+                msg, question_enrichie, chat_history, image_data=image_data
+            )
+            if not outils_bruts:
+                outils_bruts = ["__agent__"]
+        else:
+            # Injecter le prenom pour le chat aussi
+            user = cl.user_session.get("user")
+            if user and user.identifier:
+                question_chat = (
+                    f"{question}\n[Info systeme: le profil connecte est "
+                    f"{user.identifier}, mais si l'utilisateur a donne "
+                    "un autre prenom dans la conversation, utilise celui-la]"
+                )
+            else:
+                question_chat = question
+            answer = await _handle_chat(msg, question_chat, chat_history)
 
-    elif route == "agent":
-        # Agent ReAct 9 outils avec streaming (pattern P4 — astream_events)
-        answer, agent_outils, sources = await _handle_agent(msg, question, chat_history)
+        # Mettre a jour la memoire
+        add_exchange(session_id, question, answer)
 
-    else:
-        # Streaming Chat token par token (pattern P3 — chain.astream)
-        answer = await _handle_chat(msg, question, chat_history)
+        # Monitoring tokens
+        tokens_info = ""
+        tokens = get_token_summary()
+        if tokens["total_tokens"] > 0:
+            cost = tokens.get("estimated_cost_usd", 0)
+            tokens_info = (
+                f"Tokens : {tokens['total_tokens']} "
+                f"(in: {tokens['total_input_tokens']}, "
+                f"out: {tokens['total_output_tokens']}) -- "
+                f"${cost:.4f} -- {get_prompt_version()}"
+            )
 
-    # Mettre a jour la memoire
-    add_exchange(session_id, question, answer)
-
-    # Footer : sources + monitoring LLMOps
-    footer = ""
-    if route == "agent" and agent_outils:
-        badge_text = " + ".join(sorted(agent_outils))
-        footer += f"\n\n---\n**Outils utilises :** {badge_text}"
-
-    if sources:
-        footer += "\n\n**Sources :**\n"
-        for src_item in sources[:5]:
-            footer += f"- {src_item}\n"
-
-    # Monitoring LLMOps
-    tokens = get_token_summary()
-    if tokens["total_tokens"] > 0:
-        cost = tokens.get("estimated_cost_usd", 0)
-        footer += (
-            f"\n*Tokens : {tokens['total_tokens']} "
-            f"(in: {tokens['total_input_tokens']}, "
-            f"out: {tokens['total_output_tokens']}) -- "
-            f"${cost:.4f} -- {get_prompt_version()}*"
+        # Message final avec donut a gauche
+        msg.content = generer_message_avec_donut(
+            answer=answer,
+            outils_appeles=outils_bruts,
+            route=route,
+            sources=sources,
+            tokens_info=tokens_info,
         )
-
-    if footer:
-        msg.content = answer + footer
         await msg.update()
+
+    except Exception as exc:
+        logger.error("CRASH on_message : %s", exc, exc_info=True)
+        await cl.Message(content=f"Erreur : {exc}").send()
 
 
 # ── Route RAG : streaming via chain.astream (pattern P3) ─────────────────
@@ -198,8 +359,15 @@ async def on_message(message: cl.Message):
 async def _handle_rag(msg, question: str) -> tuple[str, list]:
     """Route RAG : recherche dans le corpus puis streaming de la reponse."""
     try:
+        question_lower = question.lower()
+
+        # Detection : l'utilisateur veut l'inventaire complet du corpus
+        corpus_keywords = ["liste", "combien de doc", "inventaire", "tous les doc",
+                           "resume le corpus", "resumer le corpus", "quels doc"]
+        is_corpus_listing = any(kw in question_lower for kw in corpus_keywords)
+
         from src.rag.embeddings import charger_vector_store
-        from src.rag.retriever import creer_retriever, interroger_rag
+        from src.rag.retriever import interroger_rag
 
         vector_store = charger_vector_store()
         if vector_store is None:
@@ -208,7 +376,16 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
             await msg.update()
             return error_msg, []
 
-        retriever = creer_retriever(vector_store)
+        # Si inventaire demande, k=50 pour couvrir tous les docs
+        if is_corpus_listing:
+            retriever = vector_store.as_retriever(
+                search_type="mmr",
+                search_kwargs={"k": 50, "fetch_k": 100},
+            )
+        else:
+            from src.rag.retriever import creer_retriever
+            retriever = creer_retriever(vector_store)
+
         resultat = interroger_rag(retriever, question)
         contexte = resultat["contexte"]
         documents = resultat["documents"]
@@ -259,15 +436,112 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
             return error_msg, []
 
 
+# ── Inventaire corpus complet (bypass retriever) ─────────────────────────
+
+
+async def _handle_corpus_inventory(msg, question: str) -> tuple[str, list]:
+    """Parcourt tous les PDFs du corpus et genere un resume par document."""
+    import csv
+
+    csv_path = os.path.join("outputs", "corpus_inventory.csv")
+    corpus_dir = os.path.join("data", "raw")
+
+    # Lire l'inventaire CSV
+    docs_info = []
+    if os.path.exists(csv_path):
+        with open(csv_path, encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                docs_info.append(row)
+
+    if not docs_info:
+        # Fallback : scanner le dossier
+        for f in sorted(os.listdir(corpus_dir)):
+            if f.lower().endswith(".pdf"):
+                size_mb = round(
+                    os.path.getsize(os.path.join(corpus_dir, f)) / (1024 * 1024), 1
+                )
+                docs_info.append({"fichier": f, "taille_mo": size_mb, "pages": "?"})
+
+    # Extraire la premiere page de chaque PDF pour le resume
+    summaries = []
+    for doc in docs_info:
+        path = os.path.join(corpus_dir, doc["fichier"])
+        try:
+            from langchain_community.document_loaders import PyPDFLoader
+
+            pages = PyPDFLoader(path).load()
+            first_page = pages[0].page_content[:500] if pages else ""
+        except Exception:
+            first_page = ""
+        summaries.append(
+            f"{doc['fichier']} ({doc['taille_mo']} Mo, {doc['pages']} pages) : "
+            f"{first_page[:200]}..."
+        )
+
+    # Construire le contexte et streamer la reponse
+    contexte = "\n\n".join(
+        f"Document {i+1}/{len(summaries)} : {s}" for i, s in enumerate(summaries)
+    )
+
+    from langchain_core.prompts import ChatPromptTemplate
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "Tu es DooMax, l'IA du systeme SAEARCH. "
+                "Voici l'integralite des {nb_docs} documents de ton corpus. "
+                "Resume chacun en 1-2 phrases. "
+                "Cite la source [Source: fichier, Page: 1] pour chaque document.\n\n"
+                "Documents :\n{context}",
+            ),
+            ("human", "{question}"),
+        ]
+    )
+
+    llm = get_llm("rag")
+    chain = prompt | llm
+    answer = ""
+
+    async for chunk in chain.astream(
+        {"context": contexte, "question": question, "nb_docs": len(summaries)}
+    ):
+        if hasattr(chunk, "content") and chunk.content:
+            answer += chunk.content
+            msg.content = f"**{ROUTE_LABELS['rag']}**\n\n{answer}"
+            await msg.update()
+
+    sources = [f"[Source: {d['fichier']}, Page: 1]" for d in docs_info]
+    logger.info("Inventaire corpus : %d docs, %d car", len(docs_info), len(answer))
+    return answer, sources
+
+
 # ── Route Agent : agent ReAct 9 outils (pattern P4) ──────────────────────
 
 
 async def _handle_agent(
-    msg, question: str, chat_history: list
-) -> tuple[str, set, list]:
+    msg, question: str, chat_history: list, image_data: dict = None
+) -> tuple[str, set, list, list]:
     """Route Agent : agent ReAct avec streaming astream_events."""
     agent = get_agent()
-    messages = (chat_history or []) + [HumanMessage(content=question)]
+
+    # Construire le message (texte ou multimodal)
+    if image_data:
+        human_content = [
+            {"type": "text", "text": question},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{image_data['mime']};base64,{image_data['base64']}"
+                },
+            },
+        ]
+        human_msg = HumanMessage(content=human_content)
+    else:
+        human_msg = HumanMessage(content=question)
+
+    messages = (chat_history or []) + [human_msg]
 
     answer = ""
     all_messages = []
@@ -328,9 +602,9 @@ async def _handle_agent(
                 await msg.update()
 
     # Detecter les outils appeles et les sources
-    agent_outils, sources = _detecter_outils_appeles(all_messages)
+    agent_outils, sources, outils_bruts = _detecter_outils_appeles(all_messages)
     logger.info("Agent : %d outils, %d car", len(agent_outils), len(answer))
-    return answer, agent_outils, sources
+    return answer, agent_outils, sources, outils_bruts
 
 
 # ── Route Chat : streaming via chain.astream (pattern P3) ────────────────
@@ -338,13 +612,16 @@ async def _handle_agent(
 
 async def _handle_chat(msg, question: str, chat_history: list) -> str:
     """Route Chat : conversation directe avec streaming."""
+    from datetime import datetime
+
     llm = get_llm("chat")
     chain = CHAT_PROMPT | llm
+    now = datetime.now().strftime("%A %d %B %Y, %H:%M (heure locale)")
     answer = ""
 
     try:
         async for chunk in chain.astream(
-            {"question": question, "history": chat_history}
+            {"question": question, "history": chat_history, "current_time": now}
         ):
             if hasattr(chunk, "content") and chunk.content:
                 answer += chunk.content
@@ -376,6 +653,44 @@ async def _handle_chat(msg, question: str, chat_history: list) -> str:
 
 
 # ── Upload document dynamique (PDF + DOCX) ───────────────────────────────
+
+
+async def _extraire_texte(element, doc_type: str = "pdf") -> str:
+    """Extrait le texte brut d'un PDF ou DOCX pour l'envoyer au LLM."""
+    try:
+        suffix = f".{doc_type}"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(
+                element.content
+                if isinstance(element.content, bytes)
+                else open(element.path, "rb").read()
+            )
+            tmp_path = tmp.name
+
+        if doc_type == "pdf":
+            from langchain_community.document_loaders import PyPDFLoader
+
+            loader = PyPDFLoader(tmp_path)
+        elif doc_type == "docx":
+            from langchain_community.document_loaders import Docx2txtLoader
+
+            loader = Docx2txtLoader(tmp_path)
+        else:
+            return ""
+
+        pages = loader.load()
+        # Limiter a 5000 caracteres pour ne pas exploser le contexte
+        texte = "\n".join(p.page_content for p in pages)[:5000]
+        logger.info(
+            "Texte extrait de %s : %d car (%d pages)",
+            element.name,
+            len(texte),
+            len(pages),
+        )
+        return texte
+    except Exception as exc:
+        logger.error("Erreur extraction texte %s : %s", element.name, exc)
+        return ""
 
 
 async def _integrer_document(element, doc_type: str = "pdf") -> None:
@@ -446,6 +761,11 @@ async def _integrer_document(element, doc_type: str = "pdf") -> None:
 
 try:
 
+    @cl.on_audio_start
+    async def on_audio_start():
+        """Demarre l'enregistrement audio."""
+        return True
+
     @cl.on_audio_chunk
     async def on_audio_chunk(chunk):
         """Accumule les chunks audio."""
@@ -457,7 +777,7 @@ try:
         cl.user_session.set("audio_buffer", buffer + chunk.data)
 
     @cl.on_audio_end
-    async def on_audio_end(elements: list):
+    async def on_audio_end():
         """Transcrit l'audio puis traite comme un message texte."""
         audio_buffer = cl.user_session.get("audio_buffer")
         if not audio_buffer:
@@ -468,8 +788,19 @@ try:
         try:
             from faster_whisper import WhisperModel
 
+            # Chainlit envoie du PCM16 brut — convertir en WAV
+            import struct
+            import wave
+
+            audio_mime = cl.user_session.get("audio_mime", "unknown")
+            logger.info("Format audio : %s", audio_mime)
+
             with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                tmp.write(audio_buffer)
+                with wave.open(tmp.name, "wb") as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)  # 16-bit = 2 bytes
+                    wav_file.setframerate(24000)  # sample_rate du config
+                    wav_file.writeframes(audio_buffer)
                 tmp_path = tmp.name
 
             model = WhisperModel("small", device="cpu", compute_type="int8")

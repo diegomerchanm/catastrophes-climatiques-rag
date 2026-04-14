@@ -2,15 +2,17 @@
 
 import os
 
+from src.config import RETRIEVER_K, RETRIEVER_FETCH_K, RETRIEVER_SEARCH_TYPE
+
 
 def creer_retriever(vector_store):
     """
     Crée un retriever MMR à partir d'un vector store FAISS.
-    Retourne k=4 documents en candidate pool de fetch_k=10.
+    Utilise les paramètres centralisés de config.py.
     """
     retriever = vector_store.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": 4, "fetch_k": 10},
+        search_type=RETRIEVER_SEARCH_TYPE,
+        search_kwargs={"k": RETRIEVER_K, "fetch_k": RETRIEVER_FETCH_K},
     )
     return retriever
 

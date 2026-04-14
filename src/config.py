@@ -77,8 +77,8 @@ FAISS_STORE_PATH = "faiss_store"
 
 # ── Paramètres du retriever ───────────────────────────────────────────────
 
-RETRIEVER_K = 4
-RETRIEVER_FETCH_K = 10
+RETRIEVER_K = 8
+RETRIEVER_FETCH_K = 20
 RETRIEVER_SEARCH_TYPE = "mmr"
 
 # ── Recherche hybride BM25 + Dense ────────────────────────────────────────

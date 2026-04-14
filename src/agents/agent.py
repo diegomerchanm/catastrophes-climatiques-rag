@@ -8,6 +8,7 @@ LLMOps : logging, monitoring tokens, versioning prompt, fallback.
 """
 
 import logging
+from datetime import datetime
 from typing import Annotated
 
 from dotenv import load_dotenv
@@ -78,7 +79,18 @@ def call_model(state: AgentState) -> AgentState:
 
     messages = state["messages"]
     if not any(isinstance(m, SystemMessage) for m in messages):
-        messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT)] + messages
+        now = datetime.now().strftime("%A %d %B %Y, %H:%M (heure locale)")
+
+        prompt_with_time = (
+            AGENT_SYSTEM_PROMPT
+            + f"\n\nDate et heure actuelles : {now}. "
+            "Adapte tes reponses au contexte temporel "
+            "(jour/nuit, saison, jour de la semaine). "
+            "Si l'utilisateur te donne son email ou son prenom, retiens-le "
+            "pour la suite de la conversation. Quand il dit 'envoie-moi', "
+            "utilise l'email qu'il t'a donne precedemment."
+        )
+        messages = [SystemMessage(content=prompt_with_time)] + messages
 
     response = llm_with_tools.invoke(messages)
 

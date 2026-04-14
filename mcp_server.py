@@ -16,6 +16,7 @@ from src.agents.tools import (
     get_forecast,
     get_historical_weather,
     get_weather,
+    list_corpus,
     predict_risk,
     search_corpus,
     send_email,
@@ -106,6 +107,12 @@ def score_risque(
             "corpus_mentionne_risque": corpus_mentionne_risque,
         }
     )
+
+
+@mcp.tool()
+def inventaire_corpus() -> str:
+    """Liste tous les documents du corpus SAEARCH avec taille et nombre de pages."""
+    return list_corpus.invoke({})
 
 
 # ── Lancement ─────────────────────────────────────────────────────────────

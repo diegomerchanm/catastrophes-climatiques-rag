@@ -166,11 +166,14 @@ def get_historical_weather(city: str, date: str) -> str:
                 "temperature_2m_max,temperature_2m_min,"
                 "precipitation_sum,wind_speed_10m_max,weather_code"
             ),
+            "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
             "timezone": "auto",
         }
-        resp = requests.get(f"{OPENMETEO_BASE_URL}/archive", params=params, timeout=10)
+        resp = requests.get("https://archive-api.open-meteo.com/v1/archive", params=params, timeout=10)
         resp.raise_for_status()
-        daily = resp.json()["daily"]
+        data = resp.json()
+        daily = data["daily"]
+        hourly = data.get("hourly", {})
     except requests.RequestException as exc:
         return f"Erreur API météo historique pour « {city_name} » le {date} : {exc}"
 
@@ -180,7 +183,7 @@ def get_historical_weather(city: str, date: str) -> str:
     wmo = daily.get("weather_code", [0])[0]
     conditions = _WMO_CODES.get(wmo, f"Code WMO {wmo}")
 
-    return (
+    result = (
         f"Météo historique à {city_name} le {date}\n"
         f"- Conditions       : {conditions}\n"
         f"- Température max  : {daily.get('temperature_2m_max', ['N/A'])[0]} °C\n"
@@ -188,6 +191,17 @@ def get_historical_weather(city: str, date: str) -> str:
         f"- Précipitations   : {daily.get('precipitation_sum', [0])[0]} mm\n"
         f"- Vent max         : {daily.get('wind_speed_10m_max', ['N/A'])[0]} km/h"
     )
+
+    # Ajouter les donnees horaires si disponibles
+    temps = hourly.get("temperature_2m", [])
+    if temps:
+        result += "\n\nDonnees horaires (temperature) :"
+        hours = hourly.get("time", [])
+        for i, (h, t) in enumerate(zip(hours, temps)):
+            heure = h.split("T")[1] if "T" in h else f"{i:02d}:00"
+            result += f"\n  {heure} : {t} °C"
+
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -492,6 +506,12 @@ def send_email(destinataire: str, sujet: str, contenu: str) -> str:
     """
     logger.info("Appel send_email vers %s : %s", destinataire, sujet)
 
+    # Resoudre le nom en email si besoin
+    if "@" not in destinataire:
+        resolved = TEAM_DIRECTORY.get(destinataire.strip().lower())
+        if resolved:
+            destinataire = resolved
+
     email_address = os.getenv("EMAIL_ADDRESS")
     email_password = os.getenv("EMAIL_APP_PASSWORD")
 
@@ -521,6 +541,107 @@ def send_email(destinataire: str, sujet: str, contenu: str) -> str:
     except Exception as exc:
         logger.error("Erreur envoi email : %s", exc)
         return f"Erreur lors de l'envoi : {exc}"
+
+
+# ══════════════════════════════════════════════════════════════════
+# OUTIL 7b — Envoi d'email groupé (alertes climatiques)
+# ══════════════════════════════════════════════════════════════════
+
+TEAM_EMAILS = [
+    "kamilakare@gmail.com",
+    "xiabizot@gmail.com",
+    "camille.koenig@gmail.com",
+    "diegomerchanm@gmail.com",
+    "jaysonphannguyenpro@gmail.com",
+]
+
+TEAM_DIRECTORY = {
+    "kamila": "kamilakare@gmail.com",
+    "xia": "xiabizot@gmail.com",
+    "camille": "camille.koenig@gmail.com",
+    "diego": "diegomerchanm@gmail.com",
+    "jayson": "jaysonphannguyenpro@gmail.com",
+}
+
+
+@tool
+def send_bulk_email(destinataires: str, sujet: str, contenu: str) -> str:
+    """
+    Envoie un email a plusieurs destinataires en meme temps.
+    Utilise cet outil pour les alertes climatiques groupees,
+    les rapports envoyes a une equipe, ou les notifications de masse.
+
+    Args:
+        destinataires: Adresses email separees par des virgules (ex: "a@test.com, b@test.com").
+        sujet: Sujet du mail.
+        contenu: Corps du mail en texte.
+
+    Returns:
+        Confirmation d'envoi avec le nombre de destinataires.
+    """
+    logger.info("Appel send_bulk_email : %s", sujet)
+
+    email_address = os.getenv("EMAIL_ADDRESS")
+    email_password = os.getenv("EMAIL_APP_PASSWORD")
+
+    if not email_address or not email_password:
+        return (
+            "Email non configure. Ajoutez EMAIL_ADDRESS et EMAIL_APP_PASSWORD dans .env"
+        )
+
+    # Parser les destinataires
+    dest_lower = destinataires.lower()
+    if any(kw in dest_lower for kw in ["equipe", "team", "tous", "tout le monde", "all"]):
+        emails = TEAM_EMAILS
+    else:
+        # Resoudre les noms en emails via le repertoire
+        emails = []
+        for part in destinataires.split(","):
+            part = part.strip()
+            if "@" in part:
+                emails.append(part)
+            else:
+                # Chercher par nom dans le repertoire
+                resolved = TEAM_DIRECTORY.get(part.lower())
+                if resolved:
+                    emails.append(resolved)
+    if not emails:
+        noms_dispo = ", ".join(TEAM_DIRECTORY.keys())
+        return f"Aucune adresse trouvee. Noms disponibles : {noms_dispo}"
+
+    try:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+
+        envoyes = 0
+        erreurs = []
+
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.starttls()
+            server.login(email_address, email_password)
+
+            for dest in emails:
+                try:
+                    msg = MIMEMultipart()
+                    msg["From"] = email_address
+                    msg["To"] = dest
+                    msg["Subject"] = sujet
+                    msg.attach(MIMEText(contenu, "plain", "utf-8"))
+                    server.send_message(msg)
+                    envoyes += 1
+                    logger.info("Email envoye a %s", dest)
+                except Exception as exc:
+                    erreurs.append(f"{dest}: {exc}")
+                    logger.error("Erreur envoi a %s : %s", dest, exc)
+
+        result = f"Email envoye a {envoyes}/{len(emails)} destinataires : {sujet}"
+        if erreurs:
+            result += f"\nErreurs : {'; '.join(erreurs)}"
+        return result
+    except Exception as exc:
+        logger.error("Erreur envoi email groupe : %s", exc)
+        return f"Erreur lors de l'envoi groupe : {exc}"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -709,6 +830,64 @@ def calculer_score_risque(
 
 
 # ══════════════════════════════════════════════════════════════════
+# OUTIL 10 — Inventaire du corpus RAG
+# ══════════════════════════════════════════════════════════════════
+
+
+@tool
+def list_corpus() -> str:
+    """
+    Liste tous les documents du corpus RAG avec leurs metadonnees.
+    Utilise cet outil quand l'utilisateur demande combien de documents
+    il y a, quels sont les documents disponibles, ou veut un inventaire
+    du corpus complet.
+
+    Returns:
+        Liste complete des fichiers PDF du corpus avec taille et nombre de pages.
+    """
+    logger.info("Appel list_corpus")
+
+    # Lire le CSV pre-genere (rapide)
+    csv_path = os.path.join("outputs", "corpus_inventory.csv")
+    if os.path.exists(csv_path):
+        import csv
+
+        lines = ["Corpus SAEARCH :\n"]
+        total = 0
+        with open(csv_path, encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                total += 1
+                lines.append(
+                    f"{total}. {row['fichier']} "
+                    f"({row['taille_mo']} Mo, {row['pages']} pages)"
+                )
+        lines.append(f"\nTotal : {total} documents")
+        return "\n".join(lines)
+
+    # Fallback : scan du dossier (sans compter les pages)
+    corpus_dir = os.path.join("data", "raw")
+    if not os.path.exists(corpus_dir):
+        return "Le dossier corpus (data/raw/) n'existe pas."
+
+    files = sorted(
+        f for f in os.listdir(corpus_dir)
+        if f.lower().endswith((".pdf", ".docx", ".txt"))
+    )
+
+    if not files:
+        return "Aucun document trouve dans le corpus."
+
+    lines = [f"Corpus SAEARCH : {len(files)} documents\n"]
+    for i, f in enumerate(files, 1):
+        path = os.path.join(corpus_dir, f)
+        size_mb = os.path.getsize(path) / (1024 * 1024)
+        lines.append(f"{i}. {f} ({size_mb:.1f} Mo)")
+
+    return "\n".join(lines)
+
+
+# ══════════════════════════════════════════════════════════════════
 # Export : liste des outils pour l'agent LangGraph
 # ══════════════════════════════════════════════════════════════════
 
@@ -720,6 +899,8 @@ ALL_TOOLS = [
     calculator,
     search_corpus,
     send_email,
+    send_bulk_email,
     predict_risk,
     calculer_score_risque,
+    list_corpus,
 ]
