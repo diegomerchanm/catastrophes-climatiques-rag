@@ -1,8 +1,7 @@
 name: Deploy to Azure Container Apps
 
 on:
-  push:
-    branches: [ "main" ]
+  workflow_dispatch:  # lancement manuel uniquement (requiert secret AZURE_CREDENTIALS + infra Azure)
 
 env:
   AZURE_RESOURCE_GROUP: catastrophes-climatiques-rg
