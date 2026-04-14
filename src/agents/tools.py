@@ -779,7 +779,7 @@ def predict_risk(country: str) -> str:
     lines = [
         f"Prédiction ML 2030 pour {pred['country']} ({pred['continent']})",
         f"- Impact total (tous types climatiques) : {pred['impact_pred']:.0f} décès/an",
-        f"- Détail par type :",
+        "- Détail par type :",
     ]
     for typ in CLIMATE_TYPES:
         if typ in types_data:

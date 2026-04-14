@@ -12,7 +12,6 @@ from typing import Optional
 
 from chainlit.data import BaseDataLayer
 from chainlit.types import (
-    Feedback,
     ThreadDict,
     PageInfo,
     PaginatedResponse,

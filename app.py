@@ -820,7 +820,6 @@ try:
             from faster_whisper import WhisperModel
 
             # Chainlit envoie du PCM16 brut — convertir en WAV
-            import struct
             import wave
 
             audio_mime = cl.user_session.get("audio_mime", "unknown")
