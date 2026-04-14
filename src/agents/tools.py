@@ -169,7 +169,9 @@ def get_historical_weather(city: str, date: str) -> str:
             "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
             "timezone": "auto",
         }
-        resp = requests.get("https://archive-api.open-meteo.com/v1/archive", params=params, timeout=10)
+        resp = requests.get(
+            "https://archive-api.open-meteo.com/v1/archive", params=params, timeout=10
+        )
         resp.raise_for_status()
         data = resp.json()
         daily = data["daily"]
@@ -591,7 +593,9 @@ def send_bulk_email(destinataires: str, sujet: str, contenu: str) -> str:
 
     # Parser les destinataires
     dest_lower = destinataires.lower()
-    if any(kw in dest_lower for kw in ["equipe", "team", "tous", "tout le monde", "all"]):
+    if any(
+        kw in dest_lower for kw in ["equipe", "team", "tous", "tout le monde", "all"]
+    ):
         emails = TEAM_EMAILS
     else:
         # Resoudre les noms en emails via le repertoire
@@ -834,9 +838,7 @@ def predict_risk_by_type(country: str, disaster_type: str) -> str:
 
     pays_data = detail[key]
     if typ not in pays_data["types"]:
-        return (
-            f"Pas de prédiction disponible pour {typ} en {pays_data['country']}."
-        )
+        return f"Pas de prédiction disponible pour {typ} en {pays_data['country']}."
 
     t = pays_data["types"][typ]
     # Ranking du type parmi les autres types du pays
@@ -998,7 +1000,8 @@ def list_corpus() -> str:
         return "Le dossier corpus (data/raw/) n'existe pas."
 
     files = sorted(
-        f for f in os.listdir(corpus_dir)
+        f
+        for f in os.listdir(corpus_dir)
         if f.lower().endswith((".pdf", ".docx", ".txt"))
     )
 

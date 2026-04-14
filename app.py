@@ -91,10 +91,26 @@ def auth_callback(username: str, password: str):
     # Utilisateurs autorises (en prod, utiliser une base de donnees)
     users = {
         "xiabizot@gmail.com": {"password": "saearch", "name": "Xia", "role": "admin"},
-        "kamilakare@gmail.com": {"password": "prof2026", "name": "Kamila", "role": "admin"},
-        "diegomerchanm@gmail.com": {"password": "saearch", "name": "Diego", "role": "user"},
-        "jaysonphannguyenpro@gmail.com": {"password": "saearch", "name": "Jayson", "role": "user"},
-        "camille.koenig@gmail.com": {"password": "saearch", "name": "Camille", "role": "user"},
+        "kamilakare@gmail.com": {
+            "password": "prof2026",
+            "name": "Kamila",
+            "role": "admin",
+        },
+        "diegomerchanm@gmail.com": {
+            "password": "saearch",
+            "name": "Diego",
+            "role": "user",
+        },
+        "jaysonphannguyenpro@gmail.com": {
+            "password": "saearch",
+            "name": "Jayson",
+            "role": "user",
+        },
+        "camille.koenig@gmail.com": {
+            "password": "saearch",
+            "name": "Camille",
+            "role": "user",
+        },
         "demo@saearch.ai": {"password": "demo", "name": "Demo", "role": "user"},
     }
     user = users.get(username.lower())
@@ -138,9 +154,7 @@ async def on_chat_start():
     except Exception as exc:
         logger.warning("Geolocalisation echouee : %s", exc)
     cl.user_session.set("user_location", user_location)
-    logger.info(
-        "Nouvelle session Chainlit : %s (user: %s)", session_id, user_name
-    )
+    logger.info("Nouvelle session Chainlit : %s (user: %s)", session_id, user_name)
 
     # Donut d'accueil personnalise
     greeting = f"Bonjour <b>{user_name}</b>" if user else "Bonjour"
@@ -290,11 +304,12 @@ async def on_message(message: cl.Message):
                     f"le profil connecte est {user_name}, mais si l'utilisateur "
                     "a donne un autre prenom dans la conversation, utilise celui-la"
                 )
-            if any(kw in question.lower() for kw in ["email", "mail", "envoie", "envoyer", "rappel"]):
+            if any(
+                kw in question.lower()
+                for kw in ["email", "mail", "envoie", "envoyer", "rappel"]
+            ):
                 if user_email:
-                    ctx_parts.append(
-                        f"l'email du profil connecte est {user_email}"
-                    )
+                    ctx_parts.append(f"l'email du profil connecte est {user_email}")
                 ctx_parts.append(
                     "Repertoire contacts : Kamila=kamilakare@gmail.com, "
                     "Xia=xiabizot@gmail.com, Camille=camille.koenig@gmail.com, "
@@ -370,8 +385,15 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
         question_lower = question.lower()
 
         # Detection : l'utilisateur veut l'inventaire complet du corpus
-        corpus_keywords = ["liste", "combien de doc", "inventaire", "tous les doc",
-                           "resume le corpus", "resumer le corpus", "quels doc"]
+        corpus_keywords = [
+            "liste",
+            "combien de doc",
+            "inventaire",
+            "tous les doc",
+            "resume le corpus",
+            "resumer le corpus",
+            "quels doc",
+        ]
         is_corpus_listing = any(kw in question_lower for kw in corpus_keywords)
 
         from src.rag.embeddings import charger_vector_store
@@ -392,6 +414,7 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
             )
         else:
             from src.rag.retriever import creer_retriever
+
             retriever = creer_retriever(vector_store)
 
         resultat = interroger_rag(retriever, question)

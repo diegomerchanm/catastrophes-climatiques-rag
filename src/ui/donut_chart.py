@@ -7,7 +7,17 @@ les inactifs sont grises. Les pourcentages changent dynamiquement.
 import math
 
 # Toutes les categories du systeme (toujours presentes dans le donut)
-ALL_CATEGORIES = ["RAG", "Meteo", "Web", "Calcul", "ML", "Scoring", "Email", "Agent", "Chat"]
+ALL_CATEGORIES = [
+    "RAG",
+    "Meteo",
+    "Web",
+    "Calcul",
+    "ML",
+    "Scoring",
+    "Email",
+    "Agent",
+    "Chat",
+]
 
 # Couleurs actives
 TOOL_COLORS = {
@@ -212,14 +222,33 @@ def generer_message_avec_donut(
     # Bold **text** -> <b>text</b>
     answer_html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", answer_html)
     # Italic *text* -> <i>text</i>
-    answer_html = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", answer_html)
+    answer_html = re.sub(
+        r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", answer_html
+    )
     # Lists - item -> bullet
     answer_html = re.sub(r"^- (.+)$", r"&bull; \1", answer_html, flags=re.MULTILINE)
     # Headers # ## ### #### -> bold (ordre decroissant, tolerant au whitespace leading)
-    answer_html = re.sub(r"^[ \t]*####\s+(.+?)\s*$", r"<b>\1</b>", answer_html, flags=re.MULTILINE)
-    answer_html = re.sub(r"^[ \t]*###\s+(.+?)\s*$", r"<b style='font-size:1.05em'>\1</b>", answer_html, flags=re.MULTILINE)
-    answer_html = re.sub(r"^[ \t]*##\s+(.+?)\s*$", r"<b style='font-size:1.15em'>\1</b>", answer_html, flags=re.MULTILINE)
-    answer_html = re.sub(r"^[ \t]*#\s+(.+?)\s*$", r"<b style='font-size:1.25em'>\1</b>", answer_html, flags=re.MULTILINE)
+    answer_html = re.sub(
+        r"^[ \t]*####\s+(.+?)\s*$", r"<b>\1</b>", answer_html, flags=re.MULTILINE
+    )
+    answer_html = re.sub(
+        r"^[ \t]*###\s+(.+?)\s*$",
+        r"<b style='font-size:1.05em'>\1</b>",
+        answer_html,
+        flags=re.MULTILINE,
+    )
+    answer_html = re.sub(
+        r"^[ \t]*##\s+(.+?)\s*$",
+        r"<b style='font-size:1.15em'>\1</b>",
+        answer_html,
+        flags=re.MULTILINE,
+    )
+    answer_html = re.sub(
+        r"^[ \t]*#\s+(.+?)\s*$",
+        r"<b style='font-size:1.25em'>\1</b>",
+        answer_html,
+        flags=re.MULTILINE,
+    )
     # Newlines -> <br>
     answer_html = answer_html.replace("\n", "<br>")
 

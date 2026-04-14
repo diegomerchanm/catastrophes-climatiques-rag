@@ -27,7 +27,9 @@ class SQLiteDataLayer(BaseDataLayer):
     """Data layer SQLite pour persister les conversations Chainlit."""
 
     def __init__(self):
-        os.makedirs(os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else ".", exist_ok=True)
+        os.makedirs(
+            os.path.dirname(DB_PATH) if os.path.dirname(DB_PATH) else ".", exist_ok=True
+        )
         self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         self._init_tables()
         logger.info("SQLite data layer initialise : %s", DB_PATH)
@@ -67,26 +69,54 @@ class SQLiteDataLayer(BaseDataLayer):
 
     async def get_user(self, identifier: str):
         c = self.conn.cursor()
-        c.execute("SELECT id, identifier, metadata FROM users WHERE identifier = ?", (identifier,))
+        c.execute(
+            "SELECT id, identifier, metadata FROM users WHERE identifier = ?",
+            (identifier,),
+        )
         row = c.fetchone()
         if row:
             from chainlit.user import PersistedUser
-            return PersistedUser(id=row[0], identifier=row[1], metadata=json.loads(row[2] or "{}"), createdAt=datetime.now().isoformat())
+
+            return PersistedUser(
+                id=row[0],
+                identifier=row[1],
+                metadata=json.loads(row[2] or "{}"),
+                createdAt=datetime.now().isoformat(),
+            )
         return None
 
     async def create_user(self, user):
         import uuid
+
         user_id = str(uuid.uuid4())
         c = self.conn.cursor()
         c.execute(
             "INSERT OR REPLACE INTO users (id, identifier, metadata, created_at) VALUES (?, ?, ?, ?)",
-            (user_id, user.identifier, json.dumps(user.metadata or {}), datetime.now().isoformat()),
+            (
+                user_id,
+                user.identifier,
+                json.dumps(user.metadata or {}),
+                datetime.now().isoformat(),
+            ),
         )
         self.conn.commit()
         from chainlit.user import PersistedUser
-        return PersistedUser(id=user_id, identifier=user.identifier, metadata=user.metadata or {}, createdAt=datetime.now().isoformat())
 
-    async def update_thread(self, thread_id: str, name: Optional[str] = None, user_id: Optional[str] = None, metadata: Optional[dict] = None, tags: Optional[list] = None):
+        return PersistedUser(
+            id=user_id,
+            identifier=user.identifier,
+            metadata=user.metadata or {},
+            createdAt=datetime.now().isoformat(),
+        )
+
+    async def update_thread(
+        self,
+        thread_id: str,
+        name: Optional[str] = None,
+        user_id: Optional[str] = None,
+        metadata: Optional[dict] = None,
+        tags: Optional[list] = None,
+    ):
         c = self.conn.cursor()
         c.execute("SELECT id FROM threads WHERE id = ?", (thread_id,))
         now = datetime.now().isoformat()
@@ -106,27 +136,42 @@ class SQLiteDataLayer(BaseDataLayer):
         else:
             c.execute(
                 "INSERT INTO threads (id, name, user_id, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (thread_id, name or "", user_id or "", json.dumps(metadata or {}), now, now),
+                (
+                    thread_id,
+                    name or "",
+                    user_id or "",
+                    json.dumps(metadata or {}),
+                    now,
+                    now,
+                ),
             )
         self.conn.commit()
 
     async def get_thread(self, thread_id: str) -> Optional[ThreadDict]:
         c = self.conn.cursor()
-        c.execute("SELECT id, name, user_id, metadata, created_at FROM threads WHERE id = ?", (thread_id,))
+        c.execute(
+            "SELECT id, name, user_id, metadata, created_at FROM threads WHERE id = ?",
+            (thread_id,),
+        )
         row = c.fetchone()
         if not row:
             return None
 
-        c.execute("SELECT id, type, name, output, created_at FROM steps WHERE thread_id = ? ORDER BY created_at", (thread_id,))
+        c.execute(
+            "SELECT id, type, name, output, created_at FROM steps WHERE thread_id = ? ORDER BY created_at",
+            (thread_id,),
+        )
         steps = []
         for s in c.fetchall():
-            steps.append({
-                "id": s[0],
-                "type": s[1],
-                "name": s[2],
-                "output": s[3],
-                "createdAt": s[4],
-            })
+            steps.append(
+                {
+                    "id": s[0],
+                    "type": s[1],
+                    "name": s[2],
+                    "output": s[3],
+                    "createdAt": s[4],
+                }
+            )
 
         return {
             "id": row[0],
