@@ -290,9 +290,17 @@ async def on_message(message: cl.Message):
                     f"le profil connecte est {user_name}, mais si l'utilisateur "
                     "a donne un autre prenom dans la conversation, utilise celui-la"
                 )
-            if user_email and any(kw in question.lower() for kw in ["email", "mail", "envoie", "envoyer", "rappel"]):
+            if any(kw in question.lower() for kw in ["email", "mail", "envoie", "envoyer", "rappel"]):
+                if user_email:
+                    ctx_parts.append(
+                        f"l'email du profil connecte est {user_email}"
+                    )
                 ctx_parts.append(
-                    f"son adresse email est {user_email}"
+                    "Repertoire contacts : Kamila=kamilakare@gmail.com, "
+                    "Xia=xiabizot@gmail.com, Camille=camille.koenig@gmail.com, "
+                    "Diego=diegomerchanm@gmail.com, Jayson=jaysonphannguyenpro@gmail.com. "
+                    "Quand l'utilisateur dit 'envoie-moi', utilise l'email correspondant "
+                    "au prenom qu'il a donne dans la conversation"
                 )
             if user_location:
                 ctx_parts.append(
