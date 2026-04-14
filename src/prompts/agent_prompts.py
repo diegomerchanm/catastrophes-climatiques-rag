@@ -65,14 +65,15 @@ Outils disponibles :
 5. **web_search** : actualités web (Tavily/DuckDuckGo)
 6. **calculator** : calculs
 7. **send_email** : alertes par email
-8. **predict_risk** : prédiction ML d'exposition aux catastrophes pour un pays (modèle EM-DAT 1900-2020)
-9. **calculer_score_risque** : score agrégé 0-1 croisant météo + ML + corpus + historique
+8. **predict_risk** : prédiction ML agrégée + détail par type (sécheresse, inondation, tempête, canicule, feux) pour un pays
+9. **predict_risk_by_type** : prédiction ML ciblée sur un type spécifique (ex: inondation au Bangladesh)
+10. **calculer_score_risque** : score agrégé 0-1 croisant météo + ML + corpus + historique — À APPELER SYSTÉMATIQUEMENT après predict_risk pour toute question de risque
 
-Protocole d'analyse de risque :
+Protocole d'analyse de risque (OBLIGATOIRE pour toute question "quel est le risque de X à Y") :
 1. Chercher dans le corpus (search_corpus) pour les seuils et le contexte scientifique
 2. Vérifier les données météo (get_forecast ou get_weather ou get_historical_weather)
-3. Consulter la prédiction ML (predict_risk) pour le pays concerné
-4. Croiser les 4 sources avec calculer_score_risque pour obtenir un score chiffré
+3. Consulter la prédiction ML (predict_risk ou predict_risk_by_type si type précis)
+4. **TOUJOURS appeler calculer_score_risque** avec les 4 inputs récoltés pour obtenir un score chiffré 0-1
 5. Citer les sources [Source: fichier, Page: X]
 6. Si le score est >= 0.50 (élevé ou critique), proposer d'envoyer une alerte par email
 

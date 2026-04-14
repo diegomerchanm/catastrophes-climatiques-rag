@@ -81,6 +81,7 @@ AGENT_PRIORITY = [
     "email", "mail", "envoie", "envoyer", "calcul", "combien",
     "meteo", "météo", "prevision", "prévision", "forecast",
     "temperature", "température", "historique",
+    "risque", "alerte", "score", "cette semaine", "predict",
 ]
 
 

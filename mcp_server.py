@@ -18,6 +18,7 @@ from src.agents.tools import (
     get_weather,
     list_corpus,
     predict_risk,
+    predict_risk_by_type,
     search_corpus,
     send_email,
     web_search,
@@ -85,8 +86,16 @@ def envoyer_email(destinataire: str, sujet: str, contenu: str) -> str:
 
 @mcp.tool()
 def prediction_risque(pays: str) -> str:
-    """Prédit le niveau d'exposition aux catastrophes climatiques pour un pays (modèle ML EM-DAT)."""
+    """Prédit le niveau d'exposition aux catastrophes climatiques pour un pays (agrégat + détail par type climatique, modèle ML EM-DAT multi-type)."""
     return predict_risk.invoke({"country": pays})
+
+
+@mcp.tool()
+def prediction_risque_par_type(pays: str, type_catastrophe: str) -> str:
+    """Prédit l'impact d'un type spécifique (drought, flood, extreme_weather, extreme_temperature, wildfire) pour un pays en 2030."""
+    return predict_risk_by_type.invoke(
+        {"country": pays, "disaster_type": type_catastrophe}
+    )
 
 
 @mcp.tool()
