@@ -1,0 +1,8 @@
+outil,input,latence_direct_s,latence_mcp_s,delta_ms,identiques
+meteo,Paris,0.54,0.543,3.0,True
+historique,Lyon 2023-06-15,0.758,0.78,22.0,True
+previsions,Marseille,0.529,0.533,4.0,True
+calculatrice,(25*4)+sqrt(256),0.001,0.001,0.0,True
+prediction_risque,France,0.001,0.001,0.0,True
+score_risque,scoring standard,0.0,0.001,1.0,True
+inventaire,(aucun paramètre),0.001,0.0,-1.0,True

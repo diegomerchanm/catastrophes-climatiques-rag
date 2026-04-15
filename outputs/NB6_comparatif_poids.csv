@@ -1,0 +1,4 @@
+config,tokens,cout_usd,duree_s,longueur_reponse
+BM25=30/Dense=70,18577,0.065259,23.8,2345
+BM25=50/Dense=50,18581,0.065319,16.55,2359
+BM25=70/Dense=30,18604,0.065664,18.42,2512

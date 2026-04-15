@@ -1,0 +1,23 @@
+outil,input,duree_s,statut,type_test,erreur_attendue
+get_weather,Paris,0.58,[OK],nominal,
+get_historical_weather,"Marseille, 2023-10-15",0.58,[OK],nominal,
+get_forecast,Lyon,0.53,[OK],nominal,
+web_search,catastrophes climatiques 2024,0.53,[OK],nominal,
+calculator,3+7*2,0.0,[OK],nominal,
+calculator,sqrt(144)+log(1000)/log(10),0.0,[OK],nominal,
+send_email,test@test.com,0.91,[OK],nominal,
+predict_risk,France,0.0,[KO],nominal,
+predict_risk_by_type,"France, Flood",0.0,[KO],nominal,
+calculer_score_risque,"precip=60/seuil=40, ML=Modere, histo=True, corpus=True, horizon=standard",0.0,[OK],nominal,
+list_corpus,(aucun paramètre),0.0,[OK],nominal,
+get_weather,Xyzzyville99,0.26,[OK],erreur,message ville introuvable
+get_forecast,Blablacity,0.27,[OK],erreur,message ville introuvable
+get_historical_weather,"Paris, pas-une-date",0.58,[OK],erreur,message d erreur ou aucune donnée
+get_historical_weather,"Paris, 2099-01-01",0.58,[OK],erreur,erreur ou données vides (date future)
+calculator,import os,0.0,[OK],erreur,rejet (injection bloquée par regex)
+calculator,1/0,0.0,[OK],erreur,message division par zéro
+calculator,open(/etc/passwd),0.0,[OK],erreur,rejet (injection bloquée)
+send_email,destinataire vide,0.2,[OK],erreur,message d erreur ou non configuré
+predict_risk,Atlantide,0.0,[KO],erreur,pays non trouvé dans predictions NB10
+predict_risk_by_type,"France, Alien invasion",0.0,[KO],erreur,type de catastrophe inconnu
+calculer_score_risque,horizon=horizon_bidon,0.0,[OK],erreur,fallback sur horizon standard (defensif)

@@ -1,0 +1,6 @@
+ville,niveau_risque,tokens,cout_usd,duree_s,longueur_reponse
+Marseille,CRITIQUE,46651,0.1516,103.58,1811
+Nice,CRITIQUE,51667,0.1679,99.52,1924
+Lyon,CRITIQUE,48721,0.1597,97.96,2150
+Paris,CRITIQUE,49123,0.1585,92.84,1604
+Bordeaux,CRITIQUE,47778,0.1548,94.99,1746
