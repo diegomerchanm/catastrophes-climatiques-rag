@@ -1,0 +1,7 @@
+question,tokens_in,tokens_out,total_tokens,cout_usd,duree_s,nb_outils
+"Bonjour, je suis Alice",4717,208,4925,0.017271,7.15,1
+Quelles catastrophes en Méditerranée en 2023 ?,32477,1046,33523,0.113121,27.91,3
+Quel temps fait-il à Marseille ?,9606,207,9813,0.031923,6.25,2
+Combien font 3+7*2 ?,9513,119,9632,0.030324000000000004,4.17,2
+Quel risque d'inondation à Lyon cette semaine ?,53579,883,54462,0.17398200000000003,23.33,5
+Comment je m'appelle ?,4713,60,4773,0.015039,2.89,1

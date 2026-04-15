@@ -58,6 +58,7 @@ TOOL_CATEGORIES = {
     "calculer_score_risque": "Scoring",
     "send_email": "Email",
     "send_bulk_email": "Email",
+    "schedule_email": "Email",
     "list_corpus": "RAG",
     "__agent__": "Agent",
 }
@@ -203,7 +204,7 @@ def generer_message_avec_donut(
             'border-top:1px solid #374151;font-size:12px;color:#1f2937;">'
             "<b>Sources :</b><br>"
         )
-        for src_item in sources[:5]:
+        for src_item in sources[:12]:
             sources_html += f"&bull; {src_item}<br>"
         sources_html += "</div>"
 
@@ -215,55 +216,47 @@ def generer_message_avec_donut(
             f'color:#374151;font-style:italic;">{tokens_info}</div>'
         )
 
-    # Conversion markdown basique -> HTML
+    # Conversion markdown -> HTML via la lib officielle (robuste tout cas limite)
     import re
 
-    answer_html = answer
-    # Bold **text** -> <b>text</b>
-    answer_html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", answer_html)
-    # Italic *text* -> <i>text</i>
-    answer_html = re.sub(
-        r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", answer_html
-    )
-    # Lists - item -> bullet
-    answer_html = re.sub(r"^- (.+)$", r"&bull; \1", answer_html, flags=re.MULTILINE)
-    # Headers # ## ### #### -> bold (ordre decroissant, tolerant au whitespace leading)
-    answer_html = re.sub(
-        r"^[ \t]*####\s+(.+?)\s*$", r"<b>\1</b>", answer_html, flags=re.MULTILINE
-    )
-    answer_html = re.sub(
-        r"^[ \t]*###\s+(.+?)\s*$",
-        r"<b style='font-size:1.05em'>\1</b>",
-        answer_html,
-        flags=re.MULTILINE,
-    )
-    answer_html = re.sub(
-        r"^[ \t]*##\s+(.+?)\s*$",
-        r"<b style='font-size:1.15em'>\1</b>",
-        answer_html,
-        flags=re.MULTILINE,
-    )
-    answer_html = re.sub(
-        r"^[ \t]*#\s+(.+?)\s*$",
-        r"<b style='font-size:1.25em'>\1</b>",
-        answer_html,
-        flags=re.MULTILINE,
-    )
-    # Newlines -> <br>
-    answer_html = answer_html.replace("\n", "<br>")
+    # Normalisation prealable : le LLM concatene parfois "texte.## Titre"
+    # -> inserer un saut de ligne avant les headers colles a la ponctuation
+    norm = re.sub(r"([.!?;:])\s*(#{1,4}\s)", r"\1\n\n\2", answer)
+    norm = re.sub(r"([a-zA-ZéèêàâùûçÉÈÀ])\s*(#{1,4}\s)", r"\1\n\n\2", norm)
 
-    # Layout final : legende | donut | texte
+    try:
+        import markdown as _md
+
+        answer_html = _md.markdown(
+            norm, extensions=["fenced_code", "tables", "nl2br"]
+        )
+    except ImportError:
+        # Fallback regex si lib absente
+        answer_html = norm
+        answer_html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", answer_html)
+        answer_html = re.sub(
+            r"^[ \t]*##\s+(.+?)\s*$",
+            r"<b style='font-size:1.15em'>\1</b>",
+            answer_html,
+            flags=re.MULTILINE,
+        )
+        answer_html = answer_html.replace("\n", "<br>")
+
+    # Layout vertical : donut + legende en haut (cote a cote), texte pleine
+    # largeur en dessous. Fiable desktop ET mobile : Chainlit wrappe tout
+    # dans son propre flex, donc on laisse le texte circuler sans contrainte
+    # de colonne. Le donut + legende restent groupes visuellement comme
+    # un "avatar + legende" en tete de message.
     html = (
-        f'<div style="display:flex;align-items:flex-start;gap:16px;'
-        f'padding:8px 0;">'
-        f'<div style="flex-shrink:0;text-align:right;padding-top:20px;">'
-        f"{legend_html}</div>"
-        f'<div style="flex-shrink:0;">'
-        f"{donut_svg}</div>"
-        f'<div style="flex:1;min-width:0;padding-top:4px;">'
+        f'<div style="padding:8px 0;">'
+        f'<div style="display:flex;align-items:center;gap:16px;'
+        f'margin-bottom:12px;flex-wrap:wrap;">'
+        f'<div style="flex-shrink:0;">{donut_svg}</div>'
+        f'<div style="flex-shrink:0;">{legend_html}</div>'
+        f'</div>'
         f'<div style="color:#1f2937;line-height:1.6;">{answer_html}</div>'
         f"{sources_html}{tokens_html}"
-        f"</div></div>"
+        f"</div>"
     )
 
     return html

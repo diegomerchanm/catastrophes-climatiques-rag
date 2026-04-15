@@ -1,0 +1,13 @@
+Innovation	Impact
+Embedding multilingue (paraphrase-multilingual-MiniLM-L12-v2)	Questions FR/DE/ES sur corpus EN
+Bridge lexical FR-EN (20 termes)	GIEC <-> IPCC, OMM <-> WMO, inondation <-> flood
+Diversité forcée 3 chunks/PDF	Évite qu'un gros doc (Forest_Fires 700 chunks) écrase les autres
+Quantile Regression	Robustesse aux outliers (canicule France 2003)
+Clipping ML 1.5x max historique	Plafonne les prédictions aberrantes
+Upload session-scoped	Empêche pollution corpus officiel par uploads externes
+schedule_email persistant	APScheduler + SQLite, jobs survivent au restart
+Fallback LLM quadruple	Opus -> Sonnet -> Haiku -> Ollama (résilience cloud)
+Tags MLflow experiment_type	Traçabilité A/B avant/après pivot quantile
+Bridge lexical pré-retrieval	Reformulation transparente sans modifier le corpus
+Inventaire exhaustif court-circuit	Garantit les 10 PDFs même les petits (EMDAT 17 chunks)
+Résumé multi-docs avec garantie 1 chunk/PDF	Couvre tous les documents au lieu du top-k retrieval

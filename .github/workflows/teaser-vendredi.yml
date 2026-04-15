@@ -1,0 +1,38 @@
+name: Teaser SAEARCH — vendredi 17 avril 2026
+
+# One-shot : envoie un teaser a l'equipe + prof vendredi 17 avril 2026 a 8h UTC (10h Paris).
+# A supprimer ou desactiver apres le 17/04/2026 pour eviter toute re-execution.
+
+on:
+  schedule:
+    # minute heure jour-du-mois mois jour-de-la-semaine
+    # = le 17 avril a 8h UTC (any year, but on verifie le jour dans le script si besoin)
+    - cron: "0 8 17 4 *"
+  workflow_dispatch: # permet aussi un lancement manuel via l'UI GitHub
+
+jobs:
+  teaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (pour la revue de presse via web_search)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Envoi du teaser
+        env:
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          TEASER_RECIPIENTS_JSON: ${{ secrets.TEASER_RECIPIENTS_JSON }}
+          TEASER_SIGNATURE: ${{ secrets.TEASER_SIGNATURE }}
+        run: |
+          python scripts/teaser_vendredi.py

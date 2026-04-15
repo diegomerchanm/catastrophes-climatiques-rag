@@ -1,0 +1,131 @@
+%%{init: {'theme':'base', 'themeVariables': {'primaryColor':'#fff','primaryBorderColor':'#333','lineColor':'#555','fontSize':'14px'}}}%%
+graph TB
+    User((Utilisateur<br/>FR/EN/ES/DE<br/>Voice/PDF/Text))
+
+    subgraph UI["INTERFACE - Chainlit (port 8080)"]
+        Auth[Auth password<br/>6 utilisateurs]
+        Donut[Donut chart<br/>10 categories]
+        Stream[Streaming + sources<br/>+ tokens + cout]
+        Upload[Upload PDF/DOCX<br/>session-scoped]
+        STT[STT audio<br/>Faster-Whisper]
+        Mem[Memoire conv.<br/>InMemoryHistory]
+    end
+
+    subgraph Router["ROUTER LangGraph - classify_question"]
+        Priority[AGENT_PRIORITY<br/>60+ keywords]
+        RAGkw[RAG_KEYWORDS<br/>corpus, GIEC...]
+        LLMcls[LLM Claude<br/>fallback classifier]
+    end
+
+    subgraph Agent["AGENT ReAct LangGraph"]
+        Loop[Boucle ReAct<br/>Reason -> Act -> Observe]
+        Tools[13 OUTILS @tool]
+
+        subgraph ToolsList["Outils"]
+            T1[Meteo x3<br/>OpenMeteo]
+            T2[web_search<br/>Tavily/DDG]
+            T3[calculator<br/>sandbox]
+            T4[search_corpus<br/>list_corpus]
+            T5[send_email<br/>bulk + schedule]
+            T6[predict_risk<br/>x2 + score]
+        end
+    end
+
+    subgraph RAG["RAG HYBRIDE"]
+        Dense[FAISS Dense<br/>MiniLM-L12 multilingue]
+        BM25[BM25 lexical]
+        Ensemble[EnsembleRetriever<br/>+ MMR k=12, lambda=0.7]
+        Bridge[Bridge FR-EN<br/>GIEC-IPCC, 20 termes]
+        Diversity[Diversite forcee<br/>3 chunks/PDF max]
+    end
+
+    subgraph Data["SOURCES & SERVICES"]
+        FAISSstore[(FAISS local<br/>1889 chunks<br/>10 PDFs GIEC)]
+        Session[(Session FAISS<br/>uploads volatil)]
+        OpenMeteo[OpenMeteo API]
+        Web[Tavily / DuckDuckGo]
+        Gmail[Gmail SMTP]
+        APS[(APScheduler<br/>+ SQLite jobs)]
+        ML[(ML joblib NB10<br/>Quantile + clipping<br/>EM-DAT decadal)]
+    end
+
+    subgraph LLM["LLM ORCHESTRATEUR - Anthropic Claude"]
+        Opus[Opus 4.6 heavy]
+        Sonnet[Sonnet 4.5 default]
+        Haiku[Haiku 4.5 fallback]
+        Ollama[Ollama local<br/>fallback ultime]
+    end
+
+    subgraph Obs["OBSERVABILITE - MLflow SQLite"]
+        RunsAgent[Runs agent<br/>prompt_version<br/>tokens, cout, outils]
+        RunsML[Runs training<br/>tags experiment_type<br/>Model Registry]
+    end
+
+    subgraph CICD["CI/CD - GitHub Actions"]
+        DockerCI[github-docker-cicd<br/>black + pylint + pytest<br/>Docker push Hub]
+        AzureCI[azure.yml manual<br/>train + ACR + deploy]
+        Cron[weekly-report<br/>cron lundi 8h]
+    end
+
+    subgraph MCP["MCP Server FastMCP"]
+        MCPtools[11 outils exposes<br/>en francais<br/>Claude Desktop ready]
+    end
+
+    User -->|"requete"| UI
+    UI -->|"on_message"| Router
+    Router -->|"chat"| LLM
+    Router -->|"rag"| RAG
+    Router -->|"agent"| Agent
+
+    Agent --> Tools
+    Tools --> RAG
+    Tools --> Data
+    RAG --> FAISSstore
+    RAG --> Session
+    RAG --> Bridge
+    Bridge --> Ensemble
+    Dense --> Ensemble
+    BM25 --> Ensemble
+    Ensemble --> Diversity
+    Tools --> OpenMeteo
+    Tools --> Web
+    Tools --> Gmail
+    Tools --> APS
+    Tools --> ML
+
+    Agent --> LLM
+    RAG --> LLM
+    Opus -->|429/500| Sonnet
+    Sonnet -->|429/500| Haiku
+    Haiku -->|down| Ollama
+
+    LLM -->|"reponse"| UI
+    UI -->|"affichage"| User
+
+    Agent -.logs.-> RunsAgent
+    ML -.logs.-> RunsML
+
+    DockerCI -.deploy.-> UI
+    AzureCI -.deploy.-> UI
+
+    MCPtools -.alt.-> Tools
+
+    classDef ui fill:#dbeafe,stroke:#2563eb
+    classDef router fill:#fef3c7,stroke:#d97706
+    classDef agent fill:#dcfce7,stroke:#16a34a
+    classDef rag fill:#f3e8ff,stroke:#9333ea
+    classDef data fill:#fce7f3,stroke:#db2777
+    classDef llm fill:#fed7aa,stroke:#ea580c
+    classDef obs fill:#e0e7ff,stroke:#4f46e5
+    classDef cicd fill:#ccfbf1,stroke:#0d9488
+    classDef mcp fill:#fee2e2,stroke:#dc2626
+
+    class UI,Auth,Donut,Stream,Upload,STT,Mem ui
+    class Router,Priority,RAGkw,LLMcls router
+    class Agent,Loop,Tools,T1,T2,T3,T4,T5,T6 agent
+    class RAG,Dense,BM25,Ensemble,Bridge,Diversity rag
+    class Data,FAISSstore,Session,OpenMeteo,Web,Gmail,APS,ML data
+    class LLM,Opus,Sonnet,Haiku,Ollama llm
+    class Obs,RunsAgent,RunsML obs
+    class CICD,DockerCI,AzureCI,Cron cicd
+    class MCP,MCPtools mcp
