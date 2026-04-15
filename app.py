@@ -113,7 +113,9 @@ def auth_callback(username: str, password: str):
     # Fallback minimum : compte demo pour que l'app reste utilisable
     # meme sans .env configure (pour tests basiques)
     if not users:
-        users = {"demo@saearch.ai": {"password": "demo", "name": "Demo", "role": "user"}}
+        users = {
+            "demo@saearch.ai": {"password": "demo", "name": "Demo", "role": "user"}
+        }
 
     user = users.get(username.lower())
     if user and user["password"] == password:
@@ -257,6 +259,7 @@ async def _run_decision_agent(prompt: str, route_label: str = "Agent") -> None:
     outils_bruts = []
     try:
         from src.agents.agent import get_last_tools_called
+
         outils_bruts = get_last_tools_called() or []
     except Exception:
         pass
@@ -325,6 +328,7 @@ def _log_hitl_feedback(status: str, comment: str = "") -> None:
     """Logge le feedback humain dans MLflow pour tracabilite."""
     try:
         import mlflow as _mlflow
+
         tracking = os.getenv("MLFLOW_TRACKING_URI") or "sqlite:///mlflow.db"
         _mlflow.set_tracking_uri(tracking)
         _mlflow.set_experiment(
@@ -610,11 +614,13 @@ async def on_decide_event(action: cl.Action):
         date = _clean_input(res_date)
         type_evt = _clean_input(res_type)
 
-        if await _confirmer_recap([
-            ("Lieu", lieu),
-            ("Date", date),
-            ("Type d'evenement", type_evt),
-        ]):
+        if await _confirmer_recap(
+            [
+                ("Lieu", lieu),
+                ("Date", date),
+                ("Type d'evenement", type_evt),
+            ]
+        ):
             break
         await cl.Message(content="🔄 On recommence la saisie...").send()
 
@@ -650,11 +656,13 @@ async def on_decide_insurance(action: cl.Action):
         date = _clean_input(res_date)
         type_sin = _clean_input(res_type)
 
-        if await _confirmer_recap([
-            ("Lieu du sinistre", lieu),
-            ("Date du sinistre", date),
-            ("Type de sinistre", type_sin),
-        ]):
+        if await _confirmer_recap(
+            [
+                ("Lieu du sinistre", lieu),
+                ("Date du sinistre", date),
+                ("Type de sinistre", type_sin),
+            ]
+        ):
             break
         await cl.Message(content="🔄 On recommence la saisie...").send()
 
@@ -683,10 +691,12 @@ async def on_decide_public(action: cl.Action):
         lieu = _clean_input(res_lieu)
         type_dec = _clean_input(res_type)
 
-        if await _confirmer_recap([
-            ("Commune / region", lieu),
-            ("Type de decision", type_dec),
-        ]):
+        if await _confirmer_recap(
+            [
+                ("Commune / region", lieu),
+                ("Type de decision", type_dec),
+            ]
+        ):
             break
         await cl.Message(content="🔄 On recommence la saisie...").send()
 
@@ -732,12 +742,14 @@ async def on_decide_tourist(action: cl.Action):
         duree = _clean_input(res_duree)
         type_act = _clean_input(res_type)
 
-        if await _confirmer_recap([
-            ("Destination", dest),
-            ("Date d'arrivee", date),
-            ("Duree du sejour", duree),
-            ("Type d'activite", type_act),
-        ]):
+        if await _confirmer_recap(
+            [
+                ("Destination", dest),
+                ("Date d'arrivee", date),
+                ("Duree du sejour", duree),
+                ("Type d'activite", type_act),
+            ]
+        ):
             break
         await cl.Message(content="🔄 On recommence la saisie...").send()
 
@@ -895,7 +907,8 @@ async def on_message(message: cl.Message):
                     team = {}
                 if team:
                     repertoire = ", ".join(
-                        f"{prenom.capitalize()}={email}" for prenom, email in team.items()
+                        f"{prenom.capitalize()}={email}"
+                        for prenom, email in team.items()
                     )
                     ctx_parts.append(
                         f"Repertoire contacts : {repertoire}. "
@@ -1023,7 +1036,9 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
         # Enrichissement lexical pour le retrieval (GIEC->IPCC, inondations->floods, ...)
         question_retrieval = _enrichir_query_multilingue(question)
         if question_retrieval != question:
-            logger.info("RAG query enrichie : '%s' -> '%s'", question, question_retrieval)
+            logger.info(
+                "RAG query enrichie : '%s' -> '%s'", question, question_retrieval
+            )
 
         question_lower = question.lower()
 
@@ -1062,7 +1077,9 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
         session_store = cl.user_session.get("uploaded_docs_store")
         if session_store is not None:
             vector_store.merge_from(session_store)
-            logger.info("RAG : fusion corpus + %d docs session", session_store.index.ntotal)
+            logger.info(
+                "RAG : fusion corpus + %d docs session", session_store.index.ntotal
+            )
 
         # Si inventaire demande : court-circuit retrieval, lister directement
         # les sources uniques du vectorstore (inclut les petits PDFs)
@@ -1108,6 +1125,7 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
             }
             # Trouver les PDFs absents du top-k et ajouter des chunks representatifs
             from collections import defaultdict
+
             par_source = defaultdict(list)
             for doc in vector_store.docstore._dict.values():
                 src = os.path.basename(doc.metadata.get("source", "?"))
@@ -1126,6 +1144,7 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
         # et eviter qu'un seul gros document (Forest_Fires, GAR) monopolise le top-k
         if not is_corpus_listing:
             from collections import defaultdict
+
             # Pour resume exhaustif : 2 chunks/source, cap 24 (10 PDFs x 2 = 20)
             # Sinon : 3 chunks/source, cap 12 (diversite + pertinence)
             MAX_PAR_SOURCE = 2 if wants_full_summary else 3
@@ -1141,10 +1160,14 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
                     break
             logger.info(
                 "RAG diversite : %d -> %d chunks apres limite %d/source (cap %d)",
-                len(documents_raw), len(documents), MAX_PAR_SOURCE, CAP_TOTAL,
+                len(documents_raw),
+                len(documents),
+                MAX_PAR_SOURCE,
+                CAP_TOTAL,
             )
             # Reformater contexte avec les docs filtres
             from src.rag.retriever import formater_contexte_avec_citations
+
             contexte = formater_contexte_avec_citations(documents)
         else:
             documents = documents_raw
@@ -1319,10 +1342,16 @@ async def _handle_agent(
                 output = event.get("data", {}).get("output")
                 if output and hasattr(output, "tool_calls") and output.tool_calls:
                     for tc in output.tool_calls:
-                        tname = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
+                        tname = (
+                            tc.get("name", "")
+                            if isinstance(tc, dict)
+                            else getattr(tc, "name", "")
+                        )
                         if tname:
                             tools_called_streaming.append(tname)
-                            logger.info("Tool detecte via on_chat_model_end : %s", tname)
+                            logger.info(
+                                "Tool detecte via on_chat_model_end : %s", tname
+                            )
 
             if kind == "on_chat_model_stream":
                 chunk = event["data"]["chunk"]
@@ -1353,10 +1382,16 @@ async def _handle_agent(
                 for m in all_messages:
                     if hasattr(m, "tool_calls") and m.tool_calls:
                         for tc in m.tool_calls:
-                            tname = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
+                            tname = (
+                                tc.get("name", "")
+                                if isinstance(tc, dict)
+                                else getattr(tc, "name", "")
+                            )
                             if tname and tname not in tools_called_streaming:
                                 tools_called_streaming.append(tname)
-                                logger.info("Tool detecte via on_chain_end messages : %s", tname)
+                                logger.info(
+                                    "Tool detecte via on_chain_end messages : %s", tname
+                                )
 
     except Exception as exc:
         logger.error("Erreur Agent streaming : %s", exc)
@@ -1395,7 +1430,7 @@ async def _handle_agent(
 
     # Detecter uniquement les outils/sources DU TOUR courant
     # (all_messages contient chat_history complet + nouvelles reponses, on slice)
-    nouveaux_messages = all_messages[len(messages):] if all_messages else []
+    nouveaux_messages = all_messages[len(messages) :] if all_messages else []
     agent_outils, sources, outils_bruts = _detecter_outils_appeles(nouveaux_messages)
 
     # Fallback : si detection via messages a echoue, utiliser la capture streaming
@@ -1549,7 +1584,10 @@ async def _integrer_document(element, doc_type: str = "pdf") -> None:
 
         logger.info(
             "%s %s integre en SESSION : %d pages, %d chunks (pas de save disque)",
-            doc_type.upper(), element.name, len(pages), len(chunks),
+            doc_type.upper(),
+            element.name,
+            len(pages),
+            len(chunks),
         )
         await cl.Message(
             content=(

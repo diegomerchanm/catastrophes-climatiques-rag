@@ -227,9 +227,7 @@ def generer_message_avec_donut(
     try:
         import markdown as _md
 
-        answer_html = _md.markdown(
-            norm, extensions=["fenced_code", "tables", "nl2br"]
-        )
+        answer_html = _md.markdown(norm, extensions=["fenced_code", "tables", "nl2br"])
     except ImportError:
         # Fallback regex si lib absente
         answer_html = norm
@@ -253,7 +251,7 @@ def generer_message_avec_donut(
         f'margin-bottom:12px;flex-wrap:wrap;">'
         f'<div style="flex-shrink:0;">{donut_svg}</div>'
         f'<div style="flex-shrink:0;">{legend_html}</div>'
-        f'</div>'
+        f"</div>"
         f'<div style="color:#1f2937;line-height:1.6;">{answer_html}</div>'
         f"{sources_html}{tokens_html}"
         f"</div>"

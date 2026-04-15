@@ -457,6 +457,7 @@ def _get_hybrid_retriever():
     except Exception as exc:
         logger.warning("Echec extraction chunks FAISS, fallback PDFs : %s", exc)
         from src.rag.loader import charger_et_decouper
+
         _cached_chunks = charger_et_decouper("data/raw")
 
     _cached_hybrid_retriever = creer_hybrid_retriever(
@@ -700,7 +701,9 @@ def _envoyer_email_differe(destinataire: str, sujet: str, contenu: str) -> None:
     """Job interne appele par le scheduler : envoie reellement l'email."""
     logger.info("Scheduler declenche : envoi a %s", destinataire)
     # Appel direct de la logique send_email (sans le decorateur @tool)
-    send_email.invoke({"destinataire": destinataire, "sujet": sujet, "contenu": contenu})
+    send_email.invoke(
+        {"destinataire": destinataire, "sujet": sujet, "contenu": contenu}
+    )
 
 
 @tool
@@ -825,11 +828,13 @@ def _load_predictions() -> dict | None:
 
 def _load_historical_max() -> dict:
     """Charge le max historique decadal par (pays, type) depuis EM-DAT.
-    Sert a clipper les predictions 2030 aberrantes (extrapolation warming trop forte)."""
+    Sert a clipper les predictions 2030 aberrantes (extrapolation warming trop forte).
+    """
     path = os.path.join("data", "decadal-deaths-disasters-by-type.csv")
     if not os.path.exists(path):
         return {}
     import csv
+
     maxima = {}
     try:
         with open(path, encoding="utf-8") as f:

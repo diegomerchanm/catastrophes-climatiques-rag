@@ -39,6 +39,7 @@ def get_last_tools_called() -> list[str]:
     """Retourne les outils appelés lors du dernier run_agent (pour donut, traces UI)."""
     return list(_LAST_TOOLS_CALLED)
 
+
 # ── Prompt système de l'agent (versionné — src/prompts/agent_prompts.py) ──
 
 PROMPT_VERSION = CURRENT_VERSION
