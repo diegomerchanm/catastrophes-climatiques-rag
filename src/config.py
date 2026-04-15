@@ -72,14 +72,15 @@ CHUNK_OVERLAP = 150
 
 # ── Paramètres des embeddings ─────────────────────────────────────────────
 
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 FAISS_STORE_PATH = "faiss_store"
 
 # ── Paramètres du retriever ───────────────────────────────────────────────
 
-RETRIEVER_K = 8
-RETRIEVER_FETCH_K = 20
+RETRIEVER_K = 12
+RETRIEVER_FETCH_K = 40
 RETRIEVER_SEARCH_TYPE = "mmr"
+RETRIEVER_LAMBDA = 0.7  # privilegie pertinence (1.0) vs diversite (0.0)
 
 # ── Recherche hybride BM25 + Dense ────────────────────────────────────────
 

@@ -1,3 +1,4 @@
+# ── LLM / Orchestration ──────────────────────────────────────────────
 langchain
 langchain-anthropic
 langchain-classic
@@ -6,20 +7,50 @@ langchain-core
 langchain-huggingface
 langchain-text-splitters
 langgraph
+
+# ── Vector store / RAG ──────────────────────────────────────────────
 faiss-cpu
 sentence-transformers
-chainlit
+rank-bm25
 pypdf
 docx2txt
 tiktoken
+
+# ── Outils agent ────────────────────────────────────────────────────
 tavily-python
 duckduckgo-search
 requests
-python-dotenv
-rank-bm25
-mlflow
-mcp
+
+# ── UI / Chat ───────────────────────────────────────────────────────
+chainlit
+markdown
 faster-whisper
+
+# ── Scheduler (schedule_email tool + persistance) ──────────────────
+apscheduler
+sqlalchemy
+
+# ── MCP (Model Context Protocol) ────────────────────────────────────
+mcp
+mcp-proxy
+
+# ── MLOps / Monitoring ──────────────────────────────────────────────
+mlflow
+matplotlib
+pandas
+numpy
+scikit-learn
+xgboost
+joblib
+
+# ── Notebooks / Analyse ─────────────────────────────────────────────
+jupyter
+ipykernel
+
+# ── Env / Utilitaires ───────────────────────────────────────────────
+python-dotenv
+
+# ── Qualité / Tests ─────────────────────────────────────────────────
 black
 pylint
 pytest

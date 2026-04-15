@@ -2,17 +2,27 @@
 
 import os
 
-from src.config import RETRIEVER_K, RETRIEVER_FETCH_K, RETRIEVER_SEARCH_TYPE
+from src.config import (
+    RETRIEVER_K,
+    RETRIEVER_FETCH_K,
+    RETRIEVER_SEARCH_TYPE,
+    RETRIEVER_LAMBDA,
+)
 
 
 def creer_retriever(vector_store):
     """
     Crée un retriever MMR à partir d'un vector store FAISS.
     Utilise les paramètres centralisés de config.py.
+    lambda_mult proche de 1.0 = privilegie la pertinence ; 0.0 = privilegie la diversite.
     """
     retriever = vector_store.as_retriever(
         search_type=RETRIEVER_SEARCH_TYPE,
-        search_kwargs={"k": RETRIEVER_K, "fetch_k": RETRIEVER_FETCH_K},
+        search_kwargs={
+            "k": RETRIEVER_K,
+            "fetch_k": RETRIEVER_FETCH_K,
+            "lambda_mult": RETRIEVER_LAMBDA,
+        },
     )
     return retriever
 

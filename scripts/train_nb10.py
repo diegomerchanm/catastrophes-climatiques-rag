@@ -257,18 +257,41 @@ def construire_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 REG_MODELS = {
-    "GBM_base": {"class": GradientBoostingRegressor,
-                 "kwargs": {"n_estimators": 200, "max_depth": 5, "learning_rate": 0.1}},
-    "GBM_deep": {"class": GradientBoostingRegressor,
-                 "kwargs": {"n_estimators": 400, "max_depth": 7, "learning_rate": 0.05}},
-    "GBM_shallow": {"class": GradientBoostingRegressor,
-                    "kwargs": {"n_estimators": 100, "max_depth": 3, "learning_rate": 0.1}},
-    "RF_200": {"class": RandomForestRegressor,
-               "kwargs": {"n_estimators": 200, "max_depth": 10, "n_jobs": -1}},
-    "RF_500": {"class": RandomForestRegressor,
-               "kwargs": {"n_estimators": 500, "max_depth": 15, "n_jobs": -1}},
-    "HistGBM": {"class": HistGradientBoostingRegressor,
-                "kwargs": {"max_iter": 300, "max_depth": 7, "learning_rate": 0.1}},
+    # Quantile loss (median) = robuste aux outliers (ex: canicule 2003 France)
+    "GBM_quantile_median": {
+        "class": GradientBoostingRegressor,
+        "kwargs": {
+            "n_estimators": 200, "max_depth": 5, "learning_rate": 0.1,
+            "loss": "quantile", "alpha": 0.5,
+        },
+    },
+    "GBM_quantile_deep": {
+        "class": GradientBoostingRegressor,
+        "kwargs": {
+            "n_estimators": 400, "max_depth": 7, "learning_rate": 0.05,
+            "loss": "quantile", "alpha": 0.5,
+        },
+    },
+    "GBM_quantile_shallow": {
+        "class": GradientBoostingRegressor,
+        "kwargs": {
+            "n_estimators": 100, "max_depth": 3, "learning_rate": 0.1,
+            "loss": "quantile", "alpha": 0.5,
+        },
+    },
+    # Reference : MSE (mean) - sensible aux outliers, garde pour comparaison
+    "GBM_mean": {
+        "class": GradientBoostingRegressor,
+        "kwargs": {"n_estimators": 200, "max_depth": 5, "learning_rate": 0.1},
+    },
+    "RF_200": {
+        "class": RandomForestRegressor,
+        "kwargs": {"n_estimators": 200, "max_depth": 10, "n_jobs": -1},
+    },
+    "HistGBM": {
+        "class": HistGradientBoostingRegressor,
+        "kwargs": {"max_iter": 300, "max_depth": 7, "learning_rate": 0.1},
+    },
     "Ridge": {"class": Ridge, "kwargs": {"alpha": 1.0}},
     "DecisionTree": {"class": DecisionTreeRegressor, "kwargs": {"max_depth": 10}},
 }
@@ -351,6 +374,8 @@ def entrainer_et_exporter(df: pd.DataFrame) -> None:
                 "sklearn": sklearn.__version__,
                 "platform": platform.platform(),
                 "trigger": "github_actions" if os.getenv("CI") else "manual",
+                "experiment_type": "quantile_pivot",  # bascule median vs mean
+                "motivation": "robustesse aux outliers (canicule France 2003)",
             })
             mlflow.log_params({
                 "n_features": len(FEATURES_REG),
@@ -366,7 +391,10 @@ def entrainer_et_exporter(df: pd.DataFrame) -> None:
 
         # ── GRID REGRESSION ────────────────────────────────────────────
         results_reg = []
-        best_reg, best_reg_name, best_reg_r2 = None, None, -np.inf
+        # Selection par MAE_test (minimize) : plus robuste que R2 aux outliers
+        # Mieux aligne avec Quantile Regression qui cible la mediane
+        best_reg, best_reg_name, best_reg_mae = None, None, np.inf
+        best_reg_r2 = -np.inf
         for name, spec in REG_MODELS.items():
             t0 = datetime.now()
             kwargs = {**spec["kwargs"]}
@@ -390,7 +418,20 @@ def entrainer_et_exporter(df: pd.DataFrame) -> None:
                         name, r2_te, mae_te, dur)
 
             if HAS_MLFLOW:
+                # Tag loss family pour tracabilite (mean vs quantile/median vs other)
+                loss_kind = spec["kwargs"].get("loss", "mse")
+                if loss_kind == "quantile":
+                    loss_family = f"quantile_q{spec['kwargs'].get('alpha', 0.5)}"
+                elif loss_kind in ("mse", "squared_error"):
+                    loss_family = "mean_mse"
+                else:
+                    loss_family = loss_kind
                 with mlflow.start_run(run_name=f"reg_{name}", nested=True):
+                    mlflow.set_tags({
+                        "loss_family": loss_family,
+                        "selection_metric": "mae_test",
+                        "pivot_date": "2026-04-15",  # bascule quantile
+                    })
                     mlflow.log_params({"model_type": spec["class"].__name__,
                                        "task": "regression", **spec["kwargs"]})
                     mlflow.log_metric("r2_train", r2_tr)
@@ -399,7 +440,8 @@ def entrainer_et_exporter(df: pd.DataFrame) -> None:
                     mlflow.log_metric("rmse_test", rmse_te)
                     mlflow.log_metric("train_time_s", dur)
 
-            if r2_te > best_reg_r2:
+            if mae_te < best_reg_mae:
+                best_reg_mae = mae_te
                 best_reg_r2 = r2_te
                 best_reg = pipe
                 best_reg_name = name
@@ -444,7 +486,10 @@ def entrainer_et_exporter(df: pd.DataFrame) -> None:
                 best_cls = pipe
                 best_cls_name = name
 
-        logger.info("MEILLEUR REG : %s (R2_test=%.4f)", best_reg_name, best_reg_r2)
+        logger.info(
+            "MEILLEUR REG : %s (MAE_test=%.4f, R2_test=%.4f)",
+            best_reg_name, best_reg_mae, best_reg_r2,
+        )
         logger.info("MEILLEUR CLS : %s (f1_macro=%.4f)", best_cls_name, best_cls_f1)
 
         # Metriques finales + enregistrement modele registry

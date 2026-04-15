@@ -124,6 +124,11 @@ AGENT_PRIORITY = [
     "mail",
     "envoie",
     "envoyer",
+    "programme",
+    "programmer",
+    "rappelle",
+    "rappeler",
+    "rappel dans",
     "calcul",
     "combien",
     "meteo",
@@ -139,6 +144,21 @@ AGENT_PRIORITY = [
     "score",
     "cette semaine",
     "predict",
+    "prédis",
+    "predis",
+    "prédire",
+    "predire",
+    "prédiction",
+    "prediction",
+    "en 2030",
+    "en 2025",
+    "en 2026",
+    "en 2027",
+    "en 2028",
+    "en 2029",
+    "en 2040",
+    "en 2050",
+    "impact",
 ]
 
 
@@ -187,6 +207,9 @@ RAG_PROMPT = ChatPromptTemplate.from_messages(
 Réponds à la question en utilisant UNIQUEMENT le contexte fourni.
 Cite tes sources avec [Source: nom_fichier, page X].
 Si le contexte est insuffisant, dis-le clairement en expliquant ce que tu as trouvé quand même.
+
+IMPORTANT : réponds TOUJOURS dans la langue de la question de l'utilisateur.
+Si la question est en anglais, réponds en anglais. En espagnol, en espagnol. En allemand, en allemand. En français, en français.
 
 Contexte :
 {context}""",

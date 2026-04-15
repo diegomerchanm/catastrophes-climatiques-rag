@@ -4,18 +4,20 @@ import os
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
+from src.config import EMBEDDING_MODEL
+
 DOSSIER_FAISS = "faiss_store"
 
 
 def creer_vector_store(chunks: list) -> FAISS:
     """
     Crée un vector store FAISS à partir d'une liste de chunks LangChain.
-    Utilise le modèle d'embeddings 'all-MiniLM-L6-v2' de HuggingFace.
+    Utilise le modèle d'embeddings defini dans config.EMBEDDING_MODEL.
     Sauvegarde le vector store sur disque dans DOSSIER_FAISS.
     Retourne le vector store.
     """
-    print("Initialisation du modèle d'embeddings 'all-MiniLM-L6-v2'...")
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    print(f"Initialisation du modèle d'embeddings '{EMBEDDING_MODEL}'...")
+    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
     print(f"Création du vector store FAISS à partir de {len(chunks)} chunks...")
     vector_store = FAISS.from_documents(chunks, embeddings)
@@ -40,7 +42,7 @@ def charger_vector_store() -> FAISS:
         return None
 
     print(f"Chargement du vector store depuis '{DOSSIER_FAISS}'...")
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
     vector_store = FAISS.load_local(
         DOSSIER_FAISS, embeddings, allow_dangerous_deserialization=True
     )

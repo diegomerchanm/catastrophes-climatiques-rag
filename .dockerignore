@@ -1,12 +1,37 @@
 .git
 .env
+.env.example
 __pycache__
 *.pyc
 .ipynb_checkpoints
 venv/
 .venv/
+
+# Donnees locales et brutes (PDFs ne doivent pas etre dans l'image,
+# le FAISS suffit. data/chainlit.db = sessions test, scheduler_jobs.db = jobs locaux)
 data/raw/
+data/chainlit.db
+mlflow.db
+scheduler_jobs.db
+mlruns/
+
+# Notebooks et docs (pedagogiques, pas runtime)
 notebooks/
 docs/
 *.md
 !requirements.txt
+
+# Fichiers OS
+.DS_Store
+Thumbs.db
+
+# Outils dev / test
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Binaires Windows (ffmpeg fourni via apt dans Dockerfile)
+ffmpeg.exe
