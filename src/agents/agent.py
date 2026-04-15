@@ -31,6 +31,14 @@ from src.prompts.agent_prompts import CURRENT_VERSION, get_prompt
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Liste des outils appelés lors du dernier run_agent (exposé à l'UI)
+_LAST_TOOLS_CALLED: list[str] = []
+
+
+def get_last_tools_called() -> list[str]:
+    """Retourne les outils appelés lors du dernier run_agent (pour donut, traces UI)."""
+    return list(_LAST_TOOLS_CALLED)
+
 # ── Prompt système de l'agent (versionné — src/prompts/agent_prompts.py) ──
 
 PROMPT_VERSION = CURRENT_VERSION
@@ -193,6 +201,10 @@ def run_agent(question: str, chat_history: list[BaseMessage] | None = None) -> s
             for tc in msg.tool_calls:
                 outils_appeles.append(tc["name"])
 
+    # Exposer les outils du dernier run pour l'UI (donut, traces…)
+    global _LAST_TOOLS_CALLED
+    _LAST_TOOLS_CALLED = list(outils_appeles)
+
     logger.info(
         "Réponse générée (%d car, %d outils, %.2fs)",
         len(answer),
@@ -299,7 +311,7 @@ if __name__ == "__main__":
         "Quel est le risque d'inondation à Marseille cette semaine ?",
         "Quel temps faisait-il à Paris le 1er janvier 2023 ?",
         "Combien font 3+7*2 ?",
-        "Bonjour, je suis Kamila",
+        "Bonjour, je suis Alice",
     ]
 
     question = sys.argv[1] if len(sys.argv) > 1 else questions[0]

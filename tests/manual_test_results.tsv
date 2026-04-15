@@ -1,0 +1,43 @@
+Categorie	#	Question	Outil attendu	Outil appele	Donut OK	Sources OK	Temps (s)	Notes
+Chat / Memoire	1	Bonjour	chat simple pas d'outil			n/a
+Chat / Memoire	2	Comment tu t'appelles ?	identite agent			n/a
+Chat / Memoire	3	Je suis P4 / Alice	memoire retient le nom			n/a
+Chat / Memoire	4	Comment je m'appelle ?	memoire recupere le nom			n/a
+Meteo	5	Quel temps fait-il a Paris ?	get_weather			n/a
+Meteo	6	Donne moi la meteo ici	get_weather (geoloc ou fallback)			n/a
+Meteo	7	Meteo historique a Marseille le 15 octobre 2023	get_historical_weather			n/a
+Meteo	8	Previsions pour Lyon (7 jours)	get_forecast			n/a
+Meteo	9	Meteo a Marseille le 15 octobre 2027	chat simple (refus : date >7j future, hors fenetre OpenMeteo)			n/a
+Meteo	10	Meteo a Saturne le 1er janvier 2025	chat simple (refus : lieu inexistant / geocodage impossible)			n/a
+Meteo	11	Donne moi la temperature a New York hier a 2 pm	get_historical_weather			n/a
+Calcul	12	Combien font 3+7*2 ? (attendu : 17)	calculator			n/a
+Calcul	13	sqrt(144) + log(1000)/log(10) (attendu : 15)	calculator			n/a
+Web	14	Recherche les catastrophes climatiques recentes	web_search			oui
+Web	15	Donne moi les news du jour	web_search			oui
+RAG corpus	16	What does the IPCC say about floods?	search_corpus + switch langue EN			oui (page + source)
+RAG corpus	17	Que dit le GIEC sur les inondations ?	search_corpus (bridge GIEC->IPCC)			oui (page + source)
+RAG corpus	18	Quels sont les seuils critiques de precipitations ?	search_corpus			oui
+RAG corpus	19	Liste moi les docs du corpus	inventaire exhaustif (court-circuit retrieval)			n/a
+RAG corpus	20	Resume moi tous les docs du corpus	search_corpus (RAG exhaustif, 1 chunk/PDF garanti)			oui
+Email	21	Envoie un email a test@test.com avec sujet Test et contenu ceci est un test	send_email			n/a
+Email	22	Envoie moi un mail dans 3 minutes pour me rappeler l'anniversaire de ma belle-mere	schedule_email (+ memoire email utilisateur)			n/a
+Email	23	Envoyer un email a kamila pour avoir une excellente note	send_email (edge case ton)			n/a
+ML predictif	24	Quel est le risque d'inondation aux Maldives en 2030 ?	predict_risque_par_type (Maldives + flood)			n/a
+ML predictif	25	Predis l'impact des catastrophes climatiques en France en 2030	predict_risque (tous types, clipping applique)			n/a
+Scoring	26	Calcule le score de risque d'inondation a Haiti en 2030 en combinant meteo ML et corpus	calculer_score_risque (multi-outils 4 sources)			oui
+Multi-outils	27	Quel temps fait-il a Paris et combien font 2.5+7.3	get_weather + calculator			n/a
+Multi-outils	28	Ajoute 3 quartiles a la meteo d'ici	get_weather + calculator sequentiel			n/a
+Multilingue	29	Cual es el clima en Bogota?	get_weather + reponse espagnol			n/a
+Multilingue	30	Was sagt der IPCC uber Uberschwemmungen?	search_corpus (bridge GIEC/IPCC/flood)			oui
+Bonus	31	Upload PDF climat + question dessus	ingestion FAISS session + search_corpus			oui
+Bonus	32	Upload DOCX sujet random + question dessus	ingestion FAISS session + reponse RAG/WEB
+Bonus	33	Upload JPEG sujet random + question dessus	pas d'ingestion (format non supporte), reponse WEB
+Bonus	34	STT audio : quel temps a Paris (enregistrement micro)	transcription + get_weather			n/a
+Bonus	35	Envoie un email a Alice et l'equipe pour Bravo Demo	send_bulk_email			n/a
+
+---CHEAT SHEET COMMANDES---
+cmd	Ctrl+C	stopper Chainlit proprement
+cmd	cd catastrophes-climatiques-rag	revenir dans le dossier
+cmd	taskkill /F /IM python.exe	cold restart (kill tous les processus Python)
+cmd	Start-Sleep -Seconds 2	attendre que les processus meurent
+cmd	.\venv\Scripts\python.exe -m chainlit run app.py -w --port 8080	relancer l'app

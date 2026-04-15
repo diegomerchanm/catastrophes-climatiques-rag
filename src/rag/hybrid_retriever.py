@@ -4,7 +4,7 @@ Combine la recherche sémantique (FAISS/MMR) avec la recherche par mots-clés (B
 Résolution du Lost in the Middle (slide 14) via reranking + placement stratégique.
 Référence : slide 11 du cours — "Hybrid: BM25 + Dense + Filters".
 
-Ne modifie pas le retriever.py de Diego, l'enveloppe par-dessus.
+Ne modifie pas le retriever.py de P1, l'enveloppe par-dessus.
 """
 
 import logging
@@ -32,7 +32,7 @@ def creer_hybrid_retriever(vector_store, chunks: list) -> EnsembleRetriever:
     Returns:
         EnsembleRetriever pondéré BM25 + Dense.
     """
-    # Retriever dense (celui de Diego, inchangé)
+    # Retriever dense (celui de P1, inchangé)
     dense_retriever = creer_retriever(vector_store)
 
     # Retriever BM25 (recherche par mots-clés)

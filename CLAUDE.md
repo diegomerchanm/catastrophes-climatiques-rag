@@ -61,12 +61,12 @@ catastrophes-climatiques-rag/
 
 ## Équipe et branches
 
-| Branche | Membre | Responsabilité |
+| Branche | Phase | Responsabilité |
 |---|---|---|
-| `main` (P1) | Diego Merchán | Corpus & RAG (loader, embeddings, retriever) |
-| `amorphya/agenttools` (P2) | Camille Koenig | Agents & Tools (tools.py, agent.py) |
-| `feature/p3-router-ui` (P3) | Jayson Phan Nguyen | Router & UI Chainlit (router.py, app.py) |
-| `feature/p4-memory-agent` (P4) | Xia Bizot | Mémoire, Agentic RAG, MLOps, Notebooks |
+| `main` | P1 | Corpus & RAG (loader, embeddings, retriever) |
+| `amorphya/agenttools` | P2 | Agents & Tools (tools.py, agent.py) |
+| `feature/p3-router-ui` | P3 | Router & UI Chainlit (router.py, app.py) |
+| `feature/p4-memory-agent` | P4 | Mémoire, Agentic RAG, MLOps, Notebooks |
 
 ## Phases du projet
 

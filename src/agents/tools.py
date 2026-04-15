@@ -440,13 +440,25 @@ def _get_hybrid_retriever():
 
     from src.rag.embeddings import charger_vector_store
     from src.rag.hybrid_retriever import creer_hybrid_retriever
-    from src.rag.loader import charger_et_decouper
 
     _cached_vector_store = charger_vector_store()
     if _cached_vector_store is None:
         return None
 
-    _cached_chunks = charger_et_decouper("data/raw")
+    # Extraction des chunks directement depuis le FAISS docstore.
+    # Avantages : (1) marche en container sans data/raw/, (2) plus rapide
+    # (pas de re-parsing PDFs), (3) garantit coherence chunks BM25 = chunks Dense.
+    try:
+        _cached_chunks = list(_cached_vector_store.docstore._dict.values())
+        logger.info(
+            "Chunks extraits du FAISS docstore : %d (sans recharger PDFs)",
+            len(_cached_chunks),
+        )
+    except Exception as exc:
+        logger.warning("Echec extraction chunks FAISS, fallback PDFs : %s", exc)
+        from src.rag.loader import charger_et_decouper
+        _cached_chunks = charger_et_decouper("data/raw")
+
     _cached_hybrid_retriever = creer_hybrid_retriever(
         _cached_vector_store, _cached_chunks
     )
@@ -549,21 +561,20 @@ def send_email(destinataire: str, sujet: str, contenu: str) -> str:
 # OUTIL 7b — Envoi d'email groupé (alertes climatiques)
 # ══════════════════════════════════════════════════════════════════
 
-TEAM_EMAILS = [
-    "kamilakare@gmail.com",
-    "xiabizot@gmail.com",
-    "camille.koenig@gmail.com",
-    "diegomerchanm@gmail.com",
-    "jaysonphannguyenpro@gmail.com",
-]
+# Emails equipe charges depuis env (jamais dans le code public).
+# Format attendu dans .env :
+#   TEAM_DIRECTORY_JSON={"kamila":"xxx@mail.com","xia":"xxx@mail.com",...}
+# TEAM_EMAILS est deduit automatiquement des valeurs du dict.
+import json as _json
 
-TEAM_DIRECTORY = {
-    "kamila": "kamilakare@gmail.com",
-    "xia": "xiabizot@gmail.com",
-    "camille": "camille.koenig@gmail.com",
-    "diego": "diegomerchanm@gmail.com",
-    "jayson": "jaysonphannguyenpro@gmail.com",
-}
+_directory_json = os.getenv("TEAM_DIRECTORY_JSON", "{}")
+try:
+    TEAM_DIRECTORY = _json.loads(_directory_json)
+except _json.JSONDecodeError:
+    logger.warning("TEAM_DIRECTORY_JSON mal formate, fallback vide")
+    TEAM_DIRECTORY = {}
+
+TEAM_EMAILS = list(TEAM_DIRECTORY.values())
 
 
 @tool
@@ -649,6 +660,105 @@ def send_bulk_email(destinataires: str, sujet: str, contenu: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
+# OUTIL 7c — Programmation d'email differe (scheduling)
+# ══════════════════════════════════════════════════════════════════
+
+_scheduler = None
+
+
+def _get_scheduler():
+    """Retourne l'instance BackgroundScheduler (lazy init + persistance SQLite)."""
+    global _scheduler
+    if _scheduler is None:
+        try:
+            from apscheduler.schedulers.background import BackgroundScheduler
+            from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+
+            # Persistance : jobs survivent au restart (SQLite local dedie)
+            jobstores = {
+                "default": SQLAlchemyJobStore(url="sqlite:///scheduler_jobs.db")
+            }
+            # misfire_grace_time 1h : rattrape les jobs manques au redemarrage
+            job_defaults = {"misfire_grace_time": 3600, "coalesce": True}
+            _scheduler = BackgroundScheduler(
+                jobstores=jobstores,
+                job_defaults=job_defaults,
+                timezone="Europe/Paris",
+            )
+            _scheduler.start()
+            logger.info(
+                "APScheduler demarre (timezone Europe/Paris, "
+                "persistance SQLite scheduler_jobs.db)"
+            )
+        except ImportError as e:
+            logger.warning("APScheduler/SQLAlchemy non installe : %s", e)
+            return None
+    return _scheduler
+
+
+def _envoyer_email_differe(destinataire: str, sujet: str, contenu: str) -> None:
+    """Job interne appele par le scheduler : envoie reellement l'email."""
+    logger.info("Scheduler declenche : envoi a %s", destinataire)
+    # Appel direct de la logique send_email (sans le decorateur @tool)
+    send_email.invoke({"destinataire": destinataire, "sujet": sujet, "contenu": contenu})
+
+
+@tool
+def schedule_email(
+    destinataire: str, sujet: str, contenu: str, delay_minutes: int
+) -> str:
+    """
+    Programme l'envoi d'un email dans X minutes (envoi differe).
+    Utile pour : rappels, alertes planifiees, notifications differees.
+    L'utilisateur peut demander "envoie dans 2 minutes", "rappelle-moi dans 1h",
+    "programme un mail dans 30 minutes".
+
+    Args:
+        destinataire: Adresse email ou nom (Alice, P1...).
+        sujet: Sujet du mail.
+        contenu: Corps du mail en texte.
+        delay_minutes: Delai en minutes avant l'envoi (1 a 10080, soit 7 jours max).
+
+    Returns:
+        Confirmation avec l'heure prevue d'envoi.
+    """
+    logger.info("Appel schedule_email vers %s dans %d min", destinataire, delay_minutes)
+
+    if delay_minutes < 1 or delay_minutes > 10080:
+        return "Le delai doit etre entre 1 minute et 7 jours (10080 min)."
+
+    # Resoudre le nom en email si besoin
+    if "@" not in destinataire:
+        resolved = TEAM_DIRECTORY.get(destinataire.strip().lower())
+        if resolved:
+            destinataire = resolved
+
+    scheduler = _get_scheduler()
+    if scheduler is None:
+        return (
+            "Scheduler indisponible (APScheduler non installe). "
+            "Executez : pip install apscheduler"
+        )
+
+    from datetime import datetime, timedelta
+
+    run_time = datetime.now() + timedelta(minutes=delay_minutes)
+    scheduler.add_job(
+        _envoyer_email_differe,
+        "date",
+        run_date=run_time,
+        args=[destinataire, sujet, contenu],
+        id=f"email_{run_time.timestamp()}",
+    )
+
+    heure_envoi = run_time.strftime("%H:%M:%S")
+    return (
+        f"Email programme pour {heure_envoi} (dans {delay_minutes} min) "
+        f"-> {destinataire} : {sujet}"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
 # OUTIL 8 — Prédiction ML du risque catastrophe (modèle EM-DAT multi-type)
 # ══════════════════════════════════════════════════════════════════
 
@@ -665,11 +775,31 @@ CLIMATE_TYPES = [
 
 
 def _load_predictions() -> dict | None:
-    """Charge les prédictions agrégées par pays (NB10)."""
+    """Charge les prédictions agrégées par pays (NB10).
+    L'agregat est recalcule a partir des predictions detail clippees
+    pour coherence (si clipping applique en detail, l'agregat est clippe aussi)."""
     global _cached_predictions_country
     if _cached_predictions_country is not None:
         return _cached_predictions_country
 
+    # Recompose l'agregat depuis le detail clippe
+    detail = _load_predictions_detail()
+    if detail is not None:
+        _cached_predictions_country = {}
+        for key, data in detail.items():
+            total = sum(t["impact_pred"] for t in data["types"].values())
+            _cached_predictions_country[key] = {
+                "country": data["country"],
+                "continent": data["continent"],
+                "impact_pred": total,
+            }
+        logger.info(
+            "Prédictions ML (agrégat clippe) recomposees : %d pays",
+            len(_cached_predictions_country),
+        )
+        return _cached_predictions_country
+
+    # Fallback : CSV brut si detail indisponible
     path = os.path.join("outputs", "NB10_predictions_2030_country.csv")
     if not os.path.exists(path):
         logger.warning("Prédictions ML non trouvées : %s", path)
@@ -693,6 +823,33 @@ def _load_predictions() -> dict | None:
     return _cached_predictions_country
 
 
+def _load_historical_max() -> dict:
+    """Charge le max historique decadal par (pays, type) depuis EM-DAT.
+    Sert a clipper les predictions 2030 aberrantes (extrapolation warming trop forte)."""
+    path = os.path.join("data", "decadal-deaths-disasters-by-type.csv")
+    if not os.path.exists(path):
+        return {}
+    import csv
+    maxima = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                country = row.get("entity", "").lower()
+                for t in CLIMATE_TYPES:
+                    col = f"total_dead_{t}_decadal"
+                    try:
+                        v = float(row.get(col) or 0)
+                    except ValueError:
+                        v = 0
+                    key = (country, t)
+                    if v > maxima.get(key, 0):
+                        maxima[key] = v
+    except Exception as exc:
+        logger.warning("Impossible de charger max historique : %s", exc)
+    return maxima
+
+
 def _load_predictions_detail() -> dict | None:
     """Charge les prédictions détaillées par (pays, type) (NB10)."""
     global _cached_predictions_detail
@@ -706,7 +863,12 @@ def _load_predictions_detail() -> dict | None:
 
     import csv
 
+    # Charge le max historique pour clipping des predictions aberrantes
+    hist_max = _load_historical_max()
+    clip_multiplier = 1.5  # tolerer +50% vs pire decennie historique
+
     _cached_predictions_detail = {}
+    clip_count = 0
     with open(path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -717,10 +879,24 @@ def _load_predictions_detail() -> dict | None:
                     "continent": row["continent"],
                     "types": {},
                 }
+            # Clipping anti-aberration : max 1.5x pire decennie historique
+            impact = float(row["impact_pred"])
+            hist_key = (key, row["disaster_type"])
+            hist_decadal_max = hist_max.get(hist_key, 0)
+            if hist_decadal_max > 0:
+                cap_annuel = (hist_decadal_max / 10) * clip_multiplier
+                if impact > cap_annuel:
+                    impact = cap_annuel
+                    clip_count += 1
             _cached_predictions_detail[key]["types"][row["disaster_type"]] = {
-                "impact_pred": float(row["impact_pred"]),
+                "impact_pred": impact,
                 "risk_pred": row["risk_pred"],
             }
+    if clip_count > 0:
+        logger.info(
+            "Clipping anti-aberration : %d predictions plafonnees (1.5x max historique)",
+            clip_count,
+        )
     logger.info(
         "Prédictions ML (détail) chargées : %d pays × %d types",
         len(_cached_predictions_detail),
@@ -872,11 +1048,33 @@ _RISK_LEVELS = {
     "Critique": 1.0,
 }
 
+# Ponderation par defaut (horizon "standard" = 7 jours).
+# Voir _POIDS_PAR_HORIZON pour les variantes court-terme / long-terme.
 _POIDS = {
     "meteo": 0.35,
     "corpus": 0.25,
     "ml_predict": 0.25,
     "historique": 0.15,
+}
+
+# Ponderation dynamique selon l'horizon temporel de la decision.
+# Court-terme (24-48h) : la meteo prime, ML et histo sont secondaires
+# Standard (7 jours) : equilibre entre signal frais et contexte
+# Long-terme (1-5 ans) : les projections ML + le corpus scientifique priment
+_POIDS_PAR_HORIZON = {
+    "court_terme": {
+        "meteo": 0.50,
+        "ml_predict": 0.20,
+        "corpus": 0.20,
+        "historique": 0.10,
+    },
+    "standard": _POIDS,  # 35/25/25/15 (defaut)
+    "long_terme": {
+        "meteo": 0.10,
+        "ml_predict": 0.40,
+        "corpus": 0.40,
+        "historique": 0.10,
+    },
 }
 
 
@@ -887,11 +1085,17 @@ def calculer_score_risque(
     risk_level_ml: str,
     a_precedent_historique: bool,
     corpus_mentionne_risque: bool,
+    horizon: str = "standard",
 ) -> str:
     """
     Calcule un score de risque agrégé (0-1) en croisant 4 sources :
     météo (précipitations vs seuil), ML (prédiction EM-DAT),
     corpus (GIEC mentionne un risque), historique (précédent connu).
+
+    La pondération s'adapte à l'horizon temporel de la décision :
+    - "court_terme" (24-48h) : météo 50 % + ML 20 % + corpus 20 % + histo 10 %
+    - "standard" (7 jours, défaut) : 35/25/25/15
+    - "long_terme" (1-5 ans) : ML 40 % + corpus 40 % + météo 10 % + histo 10 %
 
     Args:
         precipitation_prevue_mm: Précipitations prévues en mm.
@@ -899,16 +1103,21 @@ def calculer_score_risque(
         risk_level_ml: Niveau de risque ML (Aucun/Faible/Modéré/Élevé/Critique).
         a_precedent_historique: True si un événement similaire a eu lieu dans le passé.
         corpus_mentionne_risque: True si le corpus GIEC mentionne un risque pour la zone.
+        horizon: "court_terme" / "standard" / "long_terme" (défaut "standard").
 
     Returns:
         Score agrégé avec détail par source et décision GO/NO-GO.
     """
     logger.info(
-        "Calcul score risque : %.0fmm vs %.0fmm seuil, ML=%s",
+        "Calcul score risque : %.0fmm vs %.0fmm seuil, ML=%s, horizon=%s",
         precipitation_prevue_mm,
         seuil_critique_mm,
         risk_level_ml,
+        horizon,
     )
+
+    # Selection de la ponderation selon l'horizon (fallback standard si inconnu)
+    poids = _POIDS_PAR_HORIZON.get(horizon, _POIDS)
 
     # Score météo : ratio précipitations / seuil (plafonné à 1.0)
     if seuil_critique_mm > 0:
@@ -925,12 +1134,12 @@ def calculer_score_risque(
     # Score historique
     score_historique = 0.9 if a_precedent_historique else 0.1
 
-    # Agrégation pondérée
+    # Agrégation pondérée selon l'horizon
     score_final = (
-        _POIDS["meteo"] * score_meteo
-        + _POIDS["ml_predict"] * score_ml
-        + _POIDS["corpus"] * score_corpus
-        + _POIDS["historique"] * score_historique
+        poids["meteo"] * score_meteo
+        + poids["ml_predict"] * score_ml
+        + poids["corpus"] * score_corpus
+        + poids["historique"] * score_historique
     )
 
     # Décision
@@ -944,15 +1153,16 @@ def calculer_score_risque(
         decision = "FAIBLE — Pas d'action requise"
 
     return (
-        f"Score de risque agrégé : {score_final:.2f} / 1.00\n"
-        f"\nDétail par source :\n"
-        f"  - Météo      ({_POIDS['meteo']:.0%}) : {score_meteo:.2f} "
+        f"Score de risque agrégé : {score_final:.2f} / 1.00 "
+        f"(horizon : {horizon})\n"
+        f"\nDétail par source (pondération {horizon}) :\n"
+        f"  - Météo      ({poids['meteo']:.0%}) : {score_meteo:.2f} "
         f"({precipitation_prevue_mm:.0f}mm / {seuil_critique_mm:.0f}mm seuil)\n"
-        f"  - ML EM-DAT  ({_POIDS['ml_predict']:.0%}) : {score_ml:.2f} "
+        f"  - ML EM-DAT  ({poids['ml_predict']:.0%}) : {score_ml:.2f} "
         f"(niveau {risk_level_ml})\n"
-        f"  - Corpus GIEC ({_POIDS['corpus']:.0%}) : {score_corpus:.2f} "
+        f"  - Corpus GIEC ({poids['corpus']:.0%}) : {score_corpus:.2f} "
         f"({'risque mentionné' if corpus_mentionne_risque else 'pas de mention'})\n"
-        f"  - Historique  ({_POIDS['historique']:.0%}) : {score_historique:.2f} "
+        f"  - Historique  ({poids['historique']:.0%}) : {score_historique:.2f} "
         f"({'précédent connu' if a_precedent_historique else 'pas de précédent'})\n"
         f"\nDécision : {decision}"
     )
@@ -1030,8 +1240,20 @@ ALL_TOOLS = [
     search_corpus,
     send_email,
     send_bulk_email,
+    schedule_email,
     predict_risk,
     predict_risk_by_type,
     calculer_score_risque,
     list_corpus,
 ]
+
+
+# Initialisation EAGER du scheduler : au chargement du module tools,
+# demarre le BackgroundScheduler. Sans cela, les jobs persistes dans
+# scheduler_jobs.db ne s'executent pas tant que personne n'appelle
+# schedule_email (donc les jobs en retard restent orphelins).
+try:
+    _get_scheduler()
+    logger.info("Scheduler initialise au chargement de tools.py (eager)")
+except Exception as _e:
+    logger.warning("Init eager scheduler impossible : %s", _e)

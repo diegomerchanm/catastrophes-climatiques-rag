@@ -1,6 +1,6 @@
 """
 Point d'entrée Chainlit — Interface conversationnelle.
-Combine le router conditionnel (P3 — Jayson) avec l'agent agentic RAG (P4 — Xia).
+Combine le router conditionnel (P3 — P3) avec l'agent agentic RAG (P4 — P4).
 - Route "rag" et "chat" : streaming token par token via chain.astream() (pattern P3)
 - Route "agent" : agent ReAct 9 outils avec astream_events (pattern P4)
 - Fallback : si l'agent ou le streaming échoue, le router compilé P3 prend le relais
@@ -16,7 +16,12 @@ import chainlit.data as cl_data
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage
 
-from src.agents.agent import get_agent, get_prompt_version, get_token_summary
+from src.agents.agent import (
+    get_agent,
+    get_prompt_version,
+    get_token_summary,
+    run_agent,
+)
 from src.ui.donut_chart import generer_message_avec_donut
 from src.ui.data_layer import SQLiteDataLayer
 
@@ -49,13 +54,17 @@ ROUTE_LABELS = {
 
 TOOL_BADGES = {
     "search_corpus": "RAG",
-    "get_weather": "Agent",
-    "get_historical_weather": "Agent",
-    "get_forecast": "Agent",
-    "web_search": "Agent",
-    "calculator": "Agent",
-    "send_email": "Agent",
+    "list_corpus": "RAG",
+    "get_weather": "Meteo",
+    "get_historical_weather": "Meteo",
+    "get_forecast": "Meteo",
+    "web_search": "Web",
+    "calculator": "Calcul",
+    "send_email": "Email",
+    "send_bulk_email": "Email",
+    "schedule_email": "Email",
     "predict_risk": "ML",
+    "predict_risk_by_type": "ML",
     "calculer_score_risque": "Scoring",
 }
 
@@ -87,32 +96,25 @@ def _detecter_outils_appeles(messages: list) -> tuple[set, list, list]:
 
 @cl.password_auth_callback
 def auth_callback(username: str, password: str):
-    """Authentification simple par mot de passe."""
-    # Utilisateurs autorises (en prod, utiliser une base de donnees)
-    users = {
-        "xiabizot@gmail.com": {"password": "saearch", "name": "Xia", "role": "admin"},
-        "kamilakare@gmail.com": {
-            "password": "prof2026",
-            "name": "Kamila",
-            "role": "admin",
-        },
-        "diegomerchanm@gmail.com": {
-            "password": "saearch",
-            "name": "Diego",
-            "role": "user",
-        },
-        "jaysonphannguyenpro@gmail.com": {
-            "password": "saearch",
-            "name": "Jayson",
-            "role": "user",
-        },
-        "camille.koenig@gmail.com": {
-            "password": "saearch",
-            "name": "Camille",
-            "role": "user",
-        },
-        "demo@saearch.ai": {"password": "demo", "name": "Demo", "role": "user"},
-    }
+    """Authentification simple par mot de passe.
+    Les comptes utilisateurs sont charges depuis la variable d'environnement
+    USER_ACCOUNTS_JSON (JSON serialise). Voir .env.example pour le format.
+    En production : migrer vers OAuth + DB avec hash bcrypt.
+    """
+    import json
+
+    users_json = os.getenv("USER_ACCOUNTS_JSON", "{}")
+    try:
+        users = json.loads(users_json)
+    except json.JSONDecodeError:
+        logger.error("USER_ACCOUNTS_JSON mal formate dans .env")
+        users = {}
+
+    # Fallback minimum : compte demo pour que l'app reste utilisable
+    # meme sans .env configure (pour tests basiques)
+    if not users:
+        users = {"demo@saearch.ai": {"password": "demo", "name": "Demo", "role": "user"}}
+
     user = users.get(username.lower())
     if user and user["password"] == password:
         return cl.User(
@@ -169,6 +171,578 @@ async def on_chat_start():
         route="chat",
     )
     await cl.Message(content=donut_accueil).send()
+
+    # Mode decisionnel : 3 boutons d'aide a la decision pour profils metier
+    # (organisateur, assureur, decideur public). Clique -> dialogue guide ->
+    # prompt force format GO/NO-GO + score + recommandations.
+    decision_actions = [
+        cl.Action(
+            name="decide_event",
+            payload={"mode": "event"},
+            label="🟢 Organisation d'evenement",
+            tooltip="GO/NO-GO meteo pour evenement en exterieur",
+        ),
+        cl.Action(
+            name="decide_insurance",
+            payload={"mode": "insurance"},
+            label="🛡️ Analyse assurance",
+            tooltip="Previsibilite d'un sinistre pour contentieux juridique",
+        ),
+        cl.Action(
+            name="decide_public",
+            payload={"mode": "public"},
+            label="🚨 Decision publique",
+            tooltip="Recommandation evacuation/alerte pour autorites",
+        ),
+        cl.Action(
+            name="decide_tourist",
+            payload={"mode": "tourist"},
+            label="🏖️ Particulier / Vacances",
+            tooltip="Evaluation risque climatique pour un sejour touristique",
+        ),
+    ]
+    await cl.Message(
+        content=(
+            "<b>Mode Aide à la Décision</b> — Pour préparer vos déplacements, "
+            "vos événements, choisissez un profil pour avoir une aide à la "
+            "décision structurée en 30 secondes :"
+        ),
+        actions=decision_actions,
+    ).send()
+
+
+# ── Mode decisionnel : boutons action avec dialogue guide ─────────────────
+
+
+async def _run_decision_agent(prompt: str, route_label: str = "Agent") -> None:
+    """Execute l'agent en mode decisionnel et affiche la reponse avec donut.
+
+    Ajoute un workflow Human-in-the-Loop : apres chaque decision, 3 boutons
+    (approuver / modifier / rejeter) permettent a l'utilisateur d'engager sa
+    responsabilite. L'IA propose, l'humain dispose.
+    """
+    session_id = cl.user_session.get("session_id")
+    history = get_session_history(session_id)
+    chat_history = list(history.messages) if history else []
+
+    msg = cl.Message(content=f"**{route_label}**\n\n_Analyse en cours..._")
+    await msg.send()
+
+    try:
+        # Reuse existing agent runner
+        answer = run_agent(prompt, chat_history=chat_history)
+    except Exception as exc:
+        logger.error("Erreur mode decisionnel : %s", exc, exc_info=True)
+        msg.content = f"**Erreur**\n\n{exc}"
+        await msg.update()
+        return
+
+    # Ajout a la memoire session
+    if session_id:
+        add_exchange(session_id, prompt, answer)
+
+    # Affichage final avec donut
+    tokens = get_token_summary()
+    tokens_info = ""
+    if tokens["total_tokens"] > 0:
+        cost = tokens.get("estimated_cost_usd", 0)
+        tokens_info = (
+            f"Tokens : {tokens['total_tokens']} "
+            f"(in: {tokens['total_input_tokens']}, "
+            f"out: {tokens['total_output_tokens']}) -- "
+            f"${cost:.4f} -- {get_prompt_version()}"
+        )
+
+    # Tools detection (best-effort simple)
+    outils_bruts = []
+    try:
+        from src.agents.agent import get_last_tools_called
+        outils_bruts = get_last_tools_called() or []
+    except Exception:
+        pass
+
+    msg.content = generer_message_avec_donut(
+        answer=answer,
+        outils_appeles=outils_bruts,
+        route="agent",
+        sources=[],
+        tokens_info=tokens_info,
+    )
+    await msg.update()
+
+    # Stocker la decision courante dans la session pour les callbacks HITL
+    cl.user_session.set("last_decision_prompt", prompt)
+    cl.user_session.set("last_decision_answer", answer)
+
+    # Human-in-the-Loop : AskActionMessage rend des boutons modaux XXL,
+    # impossibles a louper sur mobile (contrairement au Message+actions
+    # qui rendait des pilules minuscules).
+    hitl_res = await cl.AskActionMessage(
+        content=(
+            "<b>🧑‍⚖️ L'IA propose, vous disposez.</b><br>"
+            "Cette recommandation doit etre <b>validee par un humain</b> "
+            "avant toute action operationnelle. Choisissez une action :"
+        ),
+        actions=[
+            cl.Action(
+                name="hitl_choice",
+                payload={"status": "approved"},
+                label="✅ J'approuve",
+            ),
+            cl.Action(
+                name="hitl_choice",
+                payload={"status": "modified"},
+                label="⚠️ Enrichir",
+            ),
+            cl.Action(
+                name="hitl_choice",
+                payload={"status": "rejected"},
+                label="❌ Rejeter",
+            ),
+        ],
+        timeout=600,
+    ).send()
+
+    if not hitl_res:
+        return
+    status = (
+        hitl_res.get("payload", {}).get("status")
+        if isinstance(hitl_res, dict)
+        else None
+    )
+    if status == "approved":
+        await _hitl_apply_approved()
+    elif status == "modified":
+        await _hitl_apply_modified()
+    elif status == "rejected":
+        await _hitl_apply_rejected()
+
+
+# ── Callbacks Human-in-the-Loop ────────────────────────────────────────────
+
+
+def _log_hitl_feedback(status: str, comment: str = "") -> None:
+    """Logge le feedback humain dans MLflow pour tracabilite."""
+    try:
+        import mlflow as _mlflow
+        tracking = os.getenv("MLFLOW_TRACKING_URI") or "sqlite:///mlflow.db"
+        _mlflow.set_tracking_uri(tracking)
+        _mlflow.set_experiment(
+            os.getenv("MLFLOW_EXPERIMENT_AGENT") or "rag-catastrophes-climatiques"
+        )
+        with _mlflow.start_run(run_name=f"hitl_{status}", nested=True):
+            _mlflow.set_tag("hitl_status", status)
+            _mlflow.set_tag("hitl_comment", comment[:250] if comment else "")
+            _mlflow.log_metric("hitl_approved", 1 if status == "approved" else 0)
+            _mlflow.log_metric("hitl_rejected", 1 if status == "rejected" else 0)
+            _mlflow.log_metric("hitl_modified", 1 if status == "modified" else 0)
+        logger.info("HITL feedback logge : %s", status)
+    except Exception as exc:
+        logger.debug("HITL MLflow log impossible : %s", exc)
+
+
+async def _hitl_apply_approved() -> None:
+    """Traitement quand l'utilisateur clique Approuver (AskActionMessage)."""
+    _log_hitl_feedback("approved")
+    await cl.Message(
+        content=(
+            "✅ <b>Decision approuvee et archivee.</b><br>"
+            "Le statut <code>approved</code> a ete logge dans MLflow "
+            "(tag <code>hitl_status=approved</code>). "
+            "Vous pouvez maintenant engager les actions operationnelles."
+        ),
+    ).send()
+
+
+async def _hitl_apply_modified() -> None:
+    """Traitement quand l'utilisateur clique Enrichir (AskActionMessage)."""
+    res_contexte = await cl.AskUserMessage(
+        content=(
+            "⚠️ <b>Contexte supplementaire ?</b><br>"
+            "Ex : 'zone cotiere exposee avec afflux touristes samedi' "
+            "ou 'precedent similaire en 2023 avec degats'. "
+            "L'agent relancera une analyse enrichie."
+        ),
+        timeout=180,
+    ).send()
+    if not res_contexte:
+        return
+    contexte = _clean_input(res_contexte)
+    _log_hitl_feedback("modified", contexte)
+
+    original_prompt = cl.user_session.get("last_decision_prompt", "")
+    new_prompt = (
+        f"{original_prompt}\n\n"
+        f"[CONTEXTE TERRAIN AJOUTE PAR L'UTILISATEUR]\n{contexte}\n\n"
+        f"Tiens compte de ce contexte pour affiner ta recommandation "
+        f"(meme format de reponse)."
+    )
+    await _run_decision_agent(new_prompt, "Mode decisionnel — Revision enrichie")
+
+
+async def _hitl_apply_rejected() -> None:
+    """Traitement quand l'utilisateur clique Rejeter (AskActionMessage)."""
+    res_raison = await cl.AskUserMessage(
+        content=(
+            "❌ <b>Pourquoi rejetez-vous cette recommandation ?</b><br>"
+            "Votre retour permettra d'ameliorer le systeme (prompt engineering, "
+            "seuils, outils) dans la prochaine version."
+        ),
+        timeout=180,
+    ).send()
+    if not res_raison:
+        return
+    raison = _clean_input(res_raison)
+    _log_hitl_feedback("rejected", raison)
+    await cl.Message(
+        content=(
+            "🚫 <b>Decision rejetee et feedback archive.</b><br>"
+            f"Raison enregistree dans MLflow : <i>{raison[:200]}</i><br>"
+            "Merci pour votre retour — il sera analyse pour affiner les prompts "
+            "decisionnels et les seuils de `calculer_score_risque`."
+        ),
+    ).send()
+
+
+def _prompt_decisionnel_event(lieu: str, date: str, type_evt: str) -> str:
+    """Construit un prompt force format decision pour evenement en exterieur."""
+    return (
+        f"[MODE DECISIONNEL GO/NO-GO — ORGANISATION EVENEMENT]\n"
+        f"Profil utilisateur : organisateur evenementiel\n"
+        f"Evenement : {type_evt} en exterieur a {lieu} le {date}\n\n"
+        f"PROTOCOLE OBLIGATOIRE :\n"
+        f"1. Appelle get_forecast({lieu}) pour les previsions meteo\n"
+        f"2. Appelle search_corpus pour verifier les seuils de risque saison\n"
+        f"3. Appelle calculer_score_risque avec les 4 sources\n\n"
+        f"FORMAT DE REPONSE STRICT (chaque champ sur sa ligne, aide utilisateur en italique sur la ligne suivante) :\n"
+        f"**DECISION** : [GO / VIGILANCE / NO-GO]\n"
+        f"*→ verdict operationnel : maintenir, surveiller ou annuler l'evenement*\n"
+        f"**SCORE** : [0.00-1.00]\n"
+        f"*→ score composite agregeant meteo / ML / corpus / historique*\n"
+        f"**NIVEAU** : [TRES FAIBLE / FAIBLE / MODERE / ELEVE / CRITIQUE]\n"
+        f"*→ traduction qualitative du score pour lecture rapide*\n"
+        f"**CONFIANCE** : [ELEVEE / MOYENNE / FAIBLE]\n"
+        f"*→ qualite et fraicheur des sources : bas si donnees manquantes ou anciennes*\n"
+        f"**JUSTIFICATION** : 3 lignes maximum\n"
+        f"**RECOMMANDATIONS** : 3 bullets concrets\n"
+        f"**SOURCES** : [Source: fichier.pdf, Page: X]\n\n"
+        f"Rappel : cette recommandation est une aide a la decision. "
+        f"La decision finale reste a l'humain responsable.\n"
+    )
+
+
+def _prompt_decisionnel_insurance(lieu: str, date_evt: str, type_sinistre: str) -> str:
+    """Construit un prompt pour analyse de previsibilite assurantielle."""
+    return (
+        f"[MODE DECISIONNEL — ANALYSE ASSURANCE]\n"
+        f"Profil utilisateur : assureur evaluant un contentieux\n"
+        f"Sinistre : {type_sinistre} a {lieu} le {date_evt}\n\n"
+        f"PROTOCOLE OBLIGATOIRE :\n"
+        f"1. search_corpus : chercher alertes et seuils documentes a l'epoque\n"
+        f"2. get_historical_weather({lieu}, {date_evt}) pour conditions reelles\n"
+        f"3. web_search : articles presse pour alertes officielles emises\n"
+        f"4. Conclure si le sinistre etait PREVISIBLE ou non\n\n"
+        f"FORMAT DE REPONSE STRICT (chaque champ sur sa ligne, aide utilisateur en italique sur la ligne suivante) :\n"
+        f"**DECISION** : [PREVISIBLE / PARTIELLEMENT PREVISIBLE / NON PREVISIBLE]\n"
+        f"*→ caractere evitable du sinistre a la date des faits*\n"
+        f"**NIVEAU DE CERTITUDE** : [FAIBLE / MOYEN / ELEVE]\n"
+        f"*→ force du faisceau de preuves disponibles (alertes, seuils, presse)*\n"
+        f"**CONFIANCE** : [ELEVEE / MOYENNE / FAIBLE]\n"
+        f"*→ qualite et fraicheur des sources : bas si donnees manquantes ou anciennes*\n"
+        f"**PREUVES CLES** : 3-5 bullets sources\n"
+        f"**IMPLICATIONS JURIDIQUES** : 2 lignes max (pas de conseil juridique)\n"
+        f"**SOURCES** : [Source: fichier.pdf, Page: X] pour chaque preuve\n\n"
+        f"Rappel : cette analyse est une aide a l'expertise. "
+        f"Elle ne remplace pas l'avis d'un expert climatologue ni d'un avocat.\n"
+    )
+
+
+def _prompt_decisionnel_public(lieu: str, type_decision: str) -> str:
+    """Construit un prompt pour decision publique (maire/prefet/SDIS)."""
+    return (
+        f"[MODE DECISIONNEL — DECISION PUBLIQUE]\n"
+        f"Profil utilisateur : autorite publique (maire/prefet/SDIS)\n"
+        f"Decision a prendre : {type_decision} pour {lieu} dans les 7 jours\n\n"
+        f"PROTOCOLE OBLIGATOIRE :\n"
+        f"1. get_forecast({lieu}) : previsions 7 jours\n"
+        f"2. search_corpus : seuils critiques de la region\n"
+        f"3. predict_risk({lieu}) ou predict_risk_by_type\n"
+        f"4. calculer_score_risque : agregation 4 sources\n\n"
+        f"FORMAT DE REPONSE STRICT (chaque champ sur sa ligne, aide utilisateur en italique sur la ligne suivante) :\n"
+        f"**RECOMMANDATION** : [DECLENCHEMENT / VIGILANCE / STANDBY]\n"
+        f"*→ action preconisee : declencher le dispositif, renforcer la veille ou maintenir le niveau actuel*\n"
+        f"**SCORE** : [0.00-1.00]\n"
+        f"*→ score composite agregeant meteo / ML / corpus / historique*\n"
+        f"**URGENCE** : [IMMEDIATE / 24-48H / 7 JOURS / ROUTINE]\n"
+        f"*→ fenetre temporelle d'action recommandee*\n"
+        f"**CONFIANCE** : [ELEVEE / MOYENNE / FAIBLE]\n"
+        f"*→ qualite et fraicheur des sources : bas si donnees manquantes ou anciennes*\n"
+        f"**JUSTIFICATION CHIFFREE** : metriques precises\n"
+        f"**MESURES CONCRETES** : 3-5 bullets operationnels\n"
+        f"**SOURCES** : [Source: fichier.pdf, Page: X]\n\n"
+        f"Rappel : cette recommandation est une aide a la decision. "
+        f"La responsabilite legale de toute mesure (evacuation, alerte, fermeture) "
+        f"incombe a l'autorite publique competente.\n"
+    )
+
+
+def _prompt_decisionnel_tourist(
+    destination: str, date_arrivee: str, duree: str, type_activite: str
+) -> str:
+    """Construit un prompt pour conseil touristique (particulier en vacances)."""
+    return (
+        f"[MODE DECISIONNEL — SEJOUR TOURISTIQUE]\n"
+        f"Profil utilisateur : particulier en visite ou vacances\n"
+        f"Destination : {destination}\n"
+        f"Date d'arrivee : {date_arrivee}\n"
+        f"Duree du sejour : {duree}\n"
+        f"Type d'activite prevue : {type_activite}\n\n"
+        f"PROTOCOLE OBLIGATOIRE :\n"
+        f"1. Appelle get_forecast({destination}) pour les previsions 7 jours\n"
+        f"2. Appelle search_corpus pour identifier les risques saisonniers de la region\n"
+        f"3. Appelle predict_risk ou predict_risk_by_type selon le type d'activite\n"
+        f"4. Appelle calculer_score_risque avec horizon='court_terme' si sejour <=7 jours, "
+        f"sinon horizon='standard'\n\n"
+        f"REGLES STRICTES DE FORMAT :\n"
+        f"- Tu commences DIRECTEMENT par **RECOMMANDATION** (pas de bandeau, "
+        f"pas d'introduction narrative, pas de 'ATTENTION', pas de preambule).\n"
+        f"- Si tu detectes une incoherence (ex : destination inadaptee a l'activite), "
+        f"mets la remarque UNIQUEMENT dans le champ **CONSEILS PRATIQUES** (premier bullet).\n"
+        f"- Respecte exactement les 7 champs ci-dessous, dans cet ordre, sans rien "
+        f"ajouter avant ni apres.\n\n"
+        f"FORMAT DE REPONSE STRICT (7 champs, commence directement par le premier, "
+        f"ajoute une ligne d'aide en italique sous chaque champ technique) :\n"
+        f"**RECOMMANDATION** : [PARTEZ TRANQUILLE / VIGILANCE / REPORTEZ LE SEJOUR]\n"
+        f"*→ conseil global pour votre sejour*\n"
+        f"**SCORE** : [0.00-1.00]\n"
+        f"*→ score composite agregeant meteo / ML / corpus / historique*\n"
+        f"**NIVEAU** : [TRES FAIBLE / FAIBLE / MODERE / ELEVE / CRITIQUE]\n"
+        f"*→ traduction qualitative du score pour lecture rapide*\n"
+        f"**CONFIANCE** : [ELEVEE / MOYENNE / FAIBLE]\n"
+        f"*→ qualite et fraicheur des sources : bas si donnees manquantes ou anciennes*\n"
+        f"**CONSEILS PRATIQUES** : 3-5 bullets concrets adaptes au touriste "
+        f"(materiel a prevoir, activites a privilegier/eviter, numeros d'urgence locaux, "
+        f"assurance voyage conseillee, points de repli en cas d'alerte). "
+        f"Si incoherence detectee (ex : destination inadaptee a l'activite), "
+        f"le premier bullet la signale factuellement, sans bandeau.\n"
+        f"**ALERTES A SURVEILLER** : 2-3 signaux meteo/actualite a verifier avant le depart\n"
+        f"**SOURCES** : [Source: fichier.pdf, Page: X]\n"
+    )
+
+
+def _clean_input(res) -> str:
+    """Extrait le texte d'une reponse AskUserMessage, trime, retourne str vide si None."""
+    if not res:
+        return ""
+    if isinstance(res, dict):
+        raw = res.get("output", "")
+    else:
+        raw = getattr(res, "content", "") or ""
+    return (raw or "").strip()
+
+
+async def _confirmer_recap(champs: list[tuple[str, str]]) -> bool:
+    """Affiche un recap des saisies et demande confirmation avant de lancer l'agent.
+
+    Args:
+        champs: liste de (label, valeur) saisis.
+
+    Returns:
+        True si l'utilisateur confirme, False s'il annule/recommence.
+    """
+    recap_html = "<b>📋 Récapitulatif de vos saisies :</b><br><br>"
+    for label, valeur in champs:
+        val_affichee = valeur if valeur else "<i>(vide)</i>"
+        recap_html += f"• <b>{label}</b> : {val_affichee}<br>"
+    recap_html += (
+        "<br>Si une info est inversée ou mal saisie, cliquez "
+        "<b>Recommencer</b>. Sinon lancez l'analyse."
+    )
+
+    res = await cl.AskActionMessage(
+        content=recap_html,
+        actions=[
+            cl.Action(
+                name="confirm_recap",
+                payload={"value": "ok"},
+                label="✅ Lancer l'analyse",
+            ),
+            cl.Action(
+                name="redo_recap",
+                payload={"value": "redo"},
+                label="🔄 Recommencer",
+            ),
+        ],
+        timeout=180,
+    ).send()
+
+    if not res:
+        return False
+    value = res.get("payload", {}).get("value") if isinstance(res, dict) else None
+    return value == "ok"
+
+
+@cl.action_callback("decide_event")
+async def on_decide_event(action: cl.Action):
+    """Dialogue guide pour decision d'organisation d'evenement."""
+    await action.remove()
+    while True:
+        res_lieu = await cl.AskUserMessage(
+            content="📍 **Lieu** de l'evenement (ville ou region) ?",
+            timeout=180,
+        ).send()
+        if not res_lieu:
+            return
+        res_date = await cl.AskUserMessage(
+            content="📅 **Date** de l'evenement (ex : samedi 19 avril 2026) ?",
+            timeout=180,
+        ).send()
+        if not res_date:
+            return
+        res_type = await cl.AskUserMessage(
+            content="🎪 **Type** d'evenement (concert, festival, mariage, sport, reunion publique...) ?",
+            timeout=180,
+        ).send()
+        if not res_type:
+            return
+
+        lieu = _clean_input(res_lieu)
+        date = _clean_input(res_date)
+        type_evt = _clean_input(res_type)
+
+        if await _confirmer_recap([
+            ("Lieu", lieu),
+            ("Date", date),
+            ("Type d'evenement", type_evt),
+        ]):
+            break
+        await cl.Message(content="🔄 On recommence la saisie...").send()
+
+    prompt = _prompt_decisionnel_event(lieu, date, type_evt)
+    await _run_decision_agent(prompt, "Mode decisionnel — Evenement")
+
+
+@cl.action_callback("decide_insurance")
+async def on_decide_insurance(action: cl.Action):
+    """Dialogue guide pour analyse de previsibilite assurantielle."""
+    await action.remove()
+    while True:
+        res_lieu = await cl.AskUserMessage(
+            content="📍 **Lieu** du sinistre ?",
+            timeout=180,
+        ).send()
+        if not res_lieu:
+            return
+        res_date = await cl.AskUserMessage(
+            content="📅 **Date** du sinistre (format AAAA-MM-JJ) ?",
+            timeout=180,
+        ).send()
+        if not res_date:
+            return
+        res_type = await cl.AskUserMessage(
+            content="💧 **Type** de sinistre (inondation, tempete, incendie, canicule...) ?",
+            timeout=180,
+        ).send()
+        if not res_type:
+            return
+
+        lieu = _clean_input(res_lieu)
+        date = _clean_input(res_date)
+        type_sin = _clean_input(res_type)
+
+        if await _confirmer_recap([
+            ("Lieu du sinistre", lieu),
+            ("Date du sinistre", date),
+            ("Type de sinistre", type_sin),
+        ]):
+            break
+        await cl.Message(content="🔄 On recommence la saisie...").send()
+
+    prompt = _prompt_decisionnel_insurance(lieu, date, type_sin)
+    await _run_decision_agent(prompt, "Mode decisionnel — Assurance")
+
+
+@cl.action_callback("decide_public")
+async def on_decide_public(action: cl.Action):
+    """Dialogue guide pour recommandation publique (maire/prefet/SDIS)."""
+    await action.remove()
+    while True:
+        res_lieu = await cl.AskUserMessage(
+            content="📍 **Commune ou region** concernee ?",
+            timeout=180,
+        ).send()
+        if not res_lieu:
+            return
+        res_type = await cl.AskUserMessage(
+            content="🚨 **Type de decision** (evacuation, alerte rouge, pre-alerte, fermeture ecoles, restriction route...) ?",
+            timeout=180,
+        ).send()
+        if not res_type:
+            return
+
+        lieu = _clean_input(res_lieu)
+        type_dec = _clean_input(res_type)
+
+        if await _confirmer_recap([
+            ("Commune / region", lieu),
+            ("Type de decision", type_dec),
+        ]):
+            break
+        await cl.Message(content="🔄 On recommence la saisie...").send()
+
+    prompt = _prompt_decisionnel_public(lieu, type_dec)
+    await _run_decision_agent(prompt, "Mode decisionnel — Decision publique")
+
+
+@cl.action_callback("decide_tourist")
+async def on_decide_tourist(action: cl.Action):
+    """Dialogue guide pour un particulier en visite ou vacances."""
+    await action.remove()
+    while True:
+        res_dest = await cl.AskUserMessage(
+            content="🏖️ **Destination** (ville, region ou pays) ?",
+            timeout=180,
+        ).send()
+        if not res_dest:
+            return
+        res_date = await cl.AskUserMessage(
+            content="📅 **Date d'arrivee** (ex : 20 avril 2026) ?",
+            timeout=180,
+        ).send()
+        if not res_date:
+            return
+        res_duree = await cl.AskUserMessage(
+            content="⏱️ **Duree du sejour** (ex : 1 semaine, 10 jours, 1 mois) ?",
+            timeout=180,
+        ).send()
+        if not res_duree:
+            return
+        res_type = await cl.AskUserMessage(
+            content=(
+                "🎒 **Type d'activite prevue** (plage, randonnee en montagne, "
+                "visite urbaine, sports nautiques, camping, ski, safari...) ?"
+            ),
+            timeout=180,
+        ).send()
+        if not res_type:
+            return
+
+        dest = _clean_input(res_dest)
+        date = _clean_input(res_date)
+        duree = _clean_input(res_duree)
+        type_act = _clean_input(res_type)
+
+        if await _confirmer_recap([
+            ("Destination", dest),
+            ("Date d'arrivee", date),
+            ("Duree du sejour", duree),
+            ("Type d'activite", type_act),
+        ]):
+            break
+        await cl.Message(content="🔄 On recommence la saisie...").send()
+
+    prompt = _prompt_decisionnel_tourist(dest, date, duree, type_act)
+    await _run_decision_agent(prompt, "Mode decisionnel — Sejour touristique")
 
 
 # ── Traitement des messages texte + fichiers ──────────────────────────────
@@ -261,7 +835,7 @@ async def on_message(message: cl.Message):
         route = "agent"
         logger.info("Image detectee -> route agent (multimodal)")
     else:
-        # Etape 1 : classifier la question via le router de Jayson (P3)
+        # Etape 1 : classifier la question via le router de P3 (P3)
         try:
             state = RouterState(
                 question=question,
@@ -310,13 +884,30 @@ async def on_message(message: cl.Message):
             ):
                 if user_email:
                     ctx_parts.append(f"l'email du profil connecte est {user_email}")
-                ctx_parts.append(
-                    "Repertoire contacts : Kamila=kamilakare@gmail.com, "
-                    "Xia=xiabizot@gmail.com, Camille=camille.koenig@gmail.com, "
-                    "Diego=diegomerchanm@gmail.com, Jayson=jaysonphannguyenpro@gmail.com. "
-                    "Quand l'utilisateur dit 'envoie-moi', utilise l'email correspondant "
-                    "au prenom qu'il a donne dans la conversation"
-                )
+                # Repertoire contacts : charge depuis TEAM_DIRECTORY_JSON
+                # (variable d'env / HF Spaces secret) — JAMAIS hardcode dans le code.
+                try:
+                    import json as _json
+
+                    team_json = os.getenv("TEAM_DIRECTORY_JSON", "").strip()
+                    team = _json.loads(team_json) if team_json else {}
+                except Exception:
+                    team = {}
+                if team:
+                    repertoire = ", ".join(
+                        f"{prenom.capitalize()}={email}" for prenom, email in team.items()
+                    )
+                    ctx_parts.append(
+                        f"Repertoire contacts : {repertoire}. "
+                        "Quand l'utilisateur dit 'envoie-moi', utilise l'email "
+                        "correspondant au prenom qu'il a donne dans la conversation. "
+                        "Ne fabrique JAMAIS d'adresse email."
+                    )
+                else:
+                    ctx_parts.append(
+                        "Aucun repertoire contacts configure (TEAM_DIRECTORY_JSON vide). "
+                        "Demande a l'utilisateur l'adresse email exacte avant tout envoi."
+                    )
             if user_location:
                 ctx_parts.append(
                     f"il se trouve a {user_location}. "
@@ -362,12 +953,18 @@ async def on_message(message: cl.Message):
             )
 
         # Message final avec donut a gauche
-        msg.content = generer_message_avec_donut(
+        # On reprefix le badge de route car generer_message_avec_donut ecrase
+        # tout le contenu (sinon le badge disparait au moment du swap vers le donut).
+        badge_final = ROUTE_LABELS.get(route, "")
+        donut_html = generer_message_avec_donut(
             answer=answer,
             outils_appeles=outils_bruts,
             route=route,
             sources=sources,
             tokens_info=tokens_info,
+        )
+        msg.content = (
+            f"**{badge_final}**\n\n{donut_html}" if badge_final else donut_html
         )
         await msg.update()
 
@@ -379,9 +976,55 @@ async def on_message(message: cl.Message):
 # ── Route RAG : streaming via chain.astream (pattern P3) ─────────────────
 
 
+# Pont lexical FR/ES/DE -> EN pour le retrieval (le corpus est en anglais).
+# La REPONSE reste dans la langue originale via le prompt RAG.
+_BRIDGE_TERMS = {
+    "GIEC": "IPCC",
+    "giec": "IPCC",
+    "inondation": "flood",
+    "inondations": "floods",
+    "secheresse": "drought",
+    "sécheresse": "drought",
+    "canicule": "heatwave",
+    "incendie": "wildfire",
+    "incendies": "wildfires",
+    "feu de foret": "wildfire",
+    "tempete": "storm",
+    "tempête": "storm",
+    "ouragan": "hurricane",
+    "cyclone": "cyclone",
+    "rechauffement": "warming",
+    "réchauffement": "warming",
+    "catastrophe": "disaster",
+    "catastrophes": "disasters",
+    "risque": "risk",
+    "risques": "risks",
+    "OMM": "WMO",
+    "ONU": "UN",
+    "Union europeenne": "European Union",
+    "Union européenne": "European Union",
+}
+
+
+def _enrichir_query_multilingue(question: str) -> str:
+    """Ajoute les equivalents anglais des termes FR pour ameliorer le retrieval."""
+    ajouts = []
+    for fr, en in _BRIDGE_TERMS.items():
+        if fr in question and en not in question:
+            ajouts.append(en)
+    if ajouts:
+        return f"{question} [{' '.join(ajouts)}]"
+    return question
+
+
 async def _handle_rag(msg, question: str) -> tuple[str, list]:
     """Route RAG : recherche dans le corpus puis streaming de la reponse."""
     try:
+        # Enrichissement lexical pour le retrieval (GIEC->IPCC, inondations->floods, ...)
+        question_retrieval = _enrichir_query_multilingue(question)
+        if question_retrieval != question:
+            logger.info("RAG query enrichie : '%s' -> '%s'", question, question_retrieval)
+
         question_lower = question.lower()
 
         # Detection : l'utilisateur veut l'inventaire complet du corpus
@@ -389,12 +1032,21 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
             "liste",
             "combien de doc",
             "inventaire",
-            "tous les doc",
-            "resume le corpus",
-            "resumer le corpus",
             "quels doc",
         ]
-        is_corpus_listing = any(kw in question_lower for kw in corpus_keywords)
+        # "résume/résumer" = demande de resume de contenu, pas d'inventaire
+        wants_summary = any(
+            kw in question_lower
+            for kw in ["résume", "resume", "résumer", "resumer", "summary", "summarize"]
+        )
+        is_corpus_listing = (
+            any(kw in question_lower for kw in corpus_keywords) and not wants_summary
+        )
+        # "résume tous / chaque / l'ensemble" = resume exhaustif de tous les docs
+        wants_full_summary = wants_summary and any(
+            kw in question_lower
+            for kw in ["tous", "chaque", "ensemble", "all", "every"]
+        )
 
         from src.rag.embeddings import charger_vector_store
         from src.rag.retriever import interroger_rag
@@ -406,20 +1058,97 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
             await msg.update()
             return error_msg, []
 
-        # Si inventaire demande, k=50 pour couvrir tous les docs
+        # Merge eventuel FAISS session-scoped (uploads du user) avec corpus officiel
+        session_store = cl.user_session.get("uploaded_docs_store")
+        if session_store is not None:
+            vector_store.merge_from(session_store)
+            logger.info("RAG : fusion corpus + %d docs session", session_store.index.ntotal)
+
+        # Si inventaire demande : court-circuit retrieval, lister directement
+        # les sources uniques du vectorstore (inclut les petits PDFs)
         if is_corpus_listing:
+            sources_uniques = {}
+            for doc in vector_store.docstore._dict.values():
+                src = os.path.basename(doc.metadata.get("source", "?"))
+                sources_uniques[src] = sources_uniques.get(src, 0) + 1
+
+            inventaire_lignes = [
+                f"{i+1}. {src} ({n} chunks indexes)"
+                for i, (src, n) in enumerate(
+                    sorted(sources_uniques.items(), key=lambda x: -x[1])
+                )
+            ]
+            inventaire_texte = (
+                f"Corpus complet : {len(sources_uniques)} documents, "
+                f"{sum(sources_uniques.values())} chunks indexes.\n\n"
+                + "\n".join(inventaire_lignes)
+            )
+            msg.content = f"**{ROUTE_LABELS['rag']}**\n\n{inventaire_texte}"
+            await msg.update()
+            sources = [f"[Source: {src}]" for src in sources_uniques.keys()]
+            logger.info("RAG inventaire direct : %d docs", len(sources_uniques))
+            return inventaire_texte, sources
+
+        else:
+            # Fetch LARGE (k=30) puis filtrage diversite par source (max 3/PDF)
             retriever = vector_store.as_retriever(
                 search_type="mmr",
-                search_kwargs={"k": 50, "fetch_k": 100},
+                search_kwargs={"k": 30, "fetch_k": 60, "lambda_mult": 0.7},
             )
+
+        # Retrieval avec query enrichie (GIEC->IPCC etc.), mais reponse LLM sur question originale
+        resultat = interroger_rag(retriever, question_retrieval)
+        contexte_raw = resultat["contexte"]
+        documents_raw = resultat["documents"]
+
+        # Si resume exhaustif demande : garantir au moins 2 chunks par PDF du corpus
+        if wants_full_summary:
+            sources_dans_top = {
+                os.path.basename(d.metadata.get("source", "?")) for d in documents_raw
+            }
+            # Trouver les PDFs absents du top-k et ajouter des chunks representatifs
+            from collections import defaultdict
+            par_source = defaultdict(list)
+            for doc in vector_store.docstore._dict.values():
+                src = os.path.basename(doc.metadata.get("source", "?"))
+                par_source[src].append(doc)
+
+            pdfs_manquants = set(par_source.keys()) - sources_dans_top
+            for pdf in pdfs_manquants:
+                # Prendre les 2 premiers chunks du PDF (souvent intro/resume)
+                documents_raw.extend(par_source[pdf][:2])
+            logger.info(
+                "RAG resume exhaustif : %d PDFs manquants ajoutes",
+                len(pdfs_manquants),
+            )
+
+        # Filtrage : max 3 chunks par PDF source pour forcer la diversite
+        # et eviter qu'un seul gros document (Forest_Fires, GAR) monopolise le top-k
+        if not is_corpus_listing:
+            from collections import defaultdict
+            # Pour resume exhaustif : 2 chunks/source, cap 24 (10 PDFs x 2 = 20)
+            # Sinon : 3 chunks/source, cap 12 (diversite + pertinence)
+            MAX_PAR_SOURCE = 2 if wants_full_summary else 3
+            CAP_TOTAL = 24 if wants_full_summary else 12
+            compteur = defaultdict(int)
+            documents = []
+            for doc in documents_raw:
+                src = os.path.basename(doc.metadata.get("source", "inconnu"))
+                if compteur[src] < MAX_PAR_SOURCE:
+                    documents.append(doc)
+                    compteur[src] += 1
+                if len(documents) >= CAP_TOTAL:
+                    break
+            logger.info(
+                "RAG diversite : %d -> %d chunks apres limite %d/source (cap %d)",
+                len(documents_raw), len(documents), MAX_PAR_SOURCE, CAP_TOTAL,
+            )
+            # Reformater contexte avec les docs filtres
+            from src.rag.retriever import formater_contexte_avec_citations
+            contexte = formater_contexte_avec_citations(documents)
         else:
-            from src.rag.retriever import creer_retriever
-
-            retriever = creer_retriever(vector_store)
-
-        resultat = interroger_rag(retriever, question)
-        contexte = resultat["contexte"]
-        documents = resultat["documents"]
+            documents = documents_raw
+            contexte = contexte_raw
 
         # Sources nettoyees (pattern P3 — os.path.basename)
         sources = []
@@ -444,7 +1173,7 @@ async def _handle_rag(msg, question: str) -> tuple[str, list]:
 
     except Exception as exc:
         logger.error("Erreur RAG streaming : %s — fallback router P3", exc)
-        # Fallback : utiliser rag_node de Jayson (P3) sans streaming
+        # Fallback : utiliser rag_node de P3 (P3) sans streaming
         try:
             state = RouterState(
                 question=question,
@@ -576,10 +1305,24 @@ async def _handle_agent(
 
     answer = ""
     all_messages = []
+    # Capture directe des tool_calls via les events on_tool_* (fallback robuste)
+    tools_called_streaming = []
 
+    event_kinds_seen = set()
     try:
         async for event in agent.astream_events({"messages": messages}, version="v2"):
             kind = event["event"]
+            event_kinds_seen.add(kind)
+
+            # Capture tool calls dans les chunks AIMessage du stream
+            if kind == "on_chat_model_end":
+                output = event.get("data", {}).get("output")
+                if output and hasattr(output, "tool_calls") and output.tool_calls:
+                    for tc in output.tool_calls:
+                        tname = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
+                        if tname:
+                            tools_called_streaming.append(tname)
+                            logger.info("Tool detecte via on_chat_model_end : %s", tname)
 
             if kind == "on_chat_model_stream":
                 chunk = event["data"]["chunk"]
@@ -595,10 +1338,25 @@ async def _handle_agent(
                     msg.content = f"**{ROUTE_LABELS['agent']}**\n\n{answer}"
                     await msg.update()
 
+            # Capture des appels d'outils pendant le streaming
+            if kind == "on_tool_start":
+                tool_name = event.get("name", "")
+                if tool_name:
+                    tools_called_streaming.append(tool_name)
+                    logger.info("Tool streaming detecte : %s", tool_name)
+
             if kind == "on_chain_end" and "messages" in event.get("data", {}).get(
                 "output", {}
             ):
                 all_messages = event["data"]["output"]["messages"]
+                # Scanner aussi pour tool_calls direct
+                for m in all_messages:
+                    if hasattr(m, "tool_calls") and m.tool_calls:
+                        for tc in m.tool_calls:
+                            tname = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
+                            if tname and tname not in tools_called_streaming:
+                                tools_called_streaming.append(tname)
+                                logger.info("Tool detecte via on_chain_end messages : %s", tname)
 
     except Exception as exc:
         logger.error("Erreur Agent streaming : %s", exc)
@@ -613,7 +1371,7 @@ async def _handle_agent(
             await msg.update()
         except Exception as exc:
             logger.warning("Agent P4 echoue : %s — fallback router P3", exc)
-            # Fallback 2 : router complet de Jayson (P3)
+            # Fallback 2 : router complet de P3 (P3)
             try:
                 state = RouterState(
                     question=question,
@@ -632,8 +1390,22 @@ async def _handle_agent(
                 msg.content += answer
                 await msg.update()
 
-    # Detecter les outils appeles et les sources
-    agent_outils, sources, outils_bruts = _detecter_outils_appeles(all_messages)
+    # Log debug des events vus (pour diagnostiquer detection outils)
+    logger.info("Events LangGraph vus : %s", sorted(event_kinds_seen))
+
+    # Detecter uniquement les outils/sources DU TOUR courant
+    # (all_messages contient chat_history complet + nouvelles reponses, on slice)
+    nouveaux_messages = all_messages[len(messages):] if all_messages else []
+    agent_outils, sources, outils_bruts = _detecter_outils_appeles(nouveaux_messages)
+
+    # Fallback : si detection via messages a echoue, utiliser la capture streaming
+    if not outils_bruts and tools_called_streaming:
+        outils_bruts = tools_called_streaming
+        agent_outils = {
+            TOOL_BADGES[t] for t in tools_called_streaming if t in TOOL_BADGES
+        }
+        logger.info("Fallback streaming : %d outils recuperes", len(outils_bruts))
+
     logger.info("Agent : %d outils, %d car", len(agent_outils), len(answer))
     return answer, agent_outils, sources, outils_bruts
 
@@ -660,7 +1432,7 @@ async def _handle_chat(msg, question: str, chat_history: list) -> str:
                 await msg.update()
     except Exception as exc:
         logger.error("Erreur Chat streaming : %s — fallback router P3", exc)
-        # Fallback : utiliser chat_node de Jayson (P3) sans streaming
+        # Fallback : utiliser chat_node de P3 (P3) sans streaming
         try:
             state = RouterState(
                 question=question,
@@ -757,28 +1529,36 @@ async def _integrer_document(element, doc_type: str = "pdf") -> None:
         pages = loader.load()
         chunks = decouper_documents(pages)
 
-        vector_store = charger_vector_store()
-        if vector_store is not None:
-            vector_store.add_documents(chunks)
-            vector_store.save_local(FAISS_STORE_PATH)
-            logger.info(
-                "PDF %s integre : %d pages, %d chunks",
-                element.name,
-                len(pages),
-                len(chunks),
-            )
-            await cl.Message(
-                content=(
-                    f"**Document integre** : {element.name}\n"
-                    f"- {len(pages)} pages lues\n"
-                    f"- {len(chunks)} passages indexes\n"
-                    f"- Disponible immediatement pour les recherches"
-                )
-            ).send()
+        # Ajout dans un FAISS SESSION-SCOPED (en memoire uniquement)
+        # pour ne pas polluer le corpus officiel faiss_store/ sur disque
+        for chunk in chunks:
+            chunk.metadata["source"] = element.name  # vrai nom au lieu du tmpXXX
+            chunk.metadata["session_upload"] = True
+
+        session_store = cl.user_session.get("uploaded_docs_store")
+        if session_store is None:
+            from langchain_community.vectorstores import FAISS as FAISS_cls
+            from langchain_huggingface import HuggingFaceEmbeddings
+            from src.config import EMBEDDING_MODEL
+
+            embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+            session_store = FAISS_cls.from_documents(chunks, embeddings)
         else:
-            await cl.Message(
-                content="Vector store non initialise. Lancez d'abord embeddings.py."
-            ).send()
+            session_store.add_documents(chunks)
+        cl.user_session.set("uploaded_docs_store", session_store)
+
+        logger.info(
+            "%s %s integre en SESSION : %d pages, %d chunks (pas de save disque)",
+            doc_type.upper(), element.name, len(pages), len(chunks),
+        )
+        await cl.Message(
+            content=(
+                f"**Document integre (session uniquement)** : {element.name}\n"
+                f"- {len(pages)} pages lues\n"
+                f"- {len(chunks)} passages indexes\n"
+                f"- Disponible pour cette session, non persiste sur disque"
+            )
+        ).send()
 
     except Exception as exc:
         logger.error("Erreur integration PDF : %s", exc)

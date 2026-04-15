@@ -23,11 +23,11 @@ def test_add_exchange():
     """Vérifie l'ajout d'échanges via add_exchange."""
     from src.memory.memory import add_exchange, get_session_history
 
-    add_exchange("test_exchange", "Je suis Kamila", "Bonjour Kamila !")
+    add_exchange("test_exchange", "Je suis Alice", "Bonjour Alice !")
     history = get_session_history("test_exchange")
     assert len(history.messages) == 2
-    assert history.messages[0].content == "Je suis Kamila"
-    assert history.messages[1].content == "Bonjour Kamila !"
+    assert history.messages[0].content == "Je suis Alice"
+    assert history.messages[1].content == "Bonjour Alice !"
 
 
 def test_memory_window_truncation():

@@ -17,3 +17,10 @@ outputs/NB10_mlflow_*_grid.csv
 
 # Etat local Chainlit (ne jamais committer)
 data/chainlit.db
+
+# Jobs planifies APScheduler (local)
+scheduler_jobs.db
+
+# BAT teaser (apercu local, pas d'interet sur le repo)
+outputs/teaser_preview.html
+outputs/teaser_preview.txt

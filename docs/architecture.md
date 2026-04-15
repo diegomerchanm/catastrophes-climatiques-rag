@@ -47,7 +47,7 @@
         │  └────────┬─────────┘  └────────────────┘  │
         │           │                                 │
         │  ┌────────▼─────────────────────────────┐  │
-        │  │  Pipeline RAG (code Diego)           │  │
+        │  │  Pipeline RAG (code P1)           │  │
         │  │  loader → embeddings → retriever     │  │
         │  │  + hybrid_retriever (BM25+Dense)     │  │
         │  │  + reranking (cross-encoder)         │  │
@@ -219,9 +219,9 @@ Envoi email (send_email)
 
 ## Équipe
 
-| Membre | Rôle | Branche | Responsabilité |
+| Phase | Rôle | Branche | Responsabilité |
 |---|---|---|---|
-| Diego Merchán | Chief Data Super Engineer | `feature/p1-rag-corpus` | RAG pipeline (loader, embeddings, retriever) |
-| Camille Koenig | Backend Developer Engineer | `amorphya/agenttools` | Agents & Tools (tools.py, agent.py) |
-| Jayson Phan Nguyen | CTO | `feature/p3-router-ui` | Router & UI Chainlit (router.py, app.py) |
-| Xia Bizot | Chef de Projet | `feature/p4-memory-agent` | Mémoire, Agentic RAG, MLOps/LLMOps, Notebooks |
+| P1 | Chief Data Super Engineer | `feature/p1-rag-corpus` | RAG pipeline (loader, embeddings, retriever) |
+| P2 | Backend Developer Engineer | `amorphya/agenttools` | Agents & Tools (tools.py, agent.py) |
+| P3 | CTO | `feature/p3-router-ui` | Router & UI Chainlit (router.py, app.py) |
+| P4 | Chef de Projet | `feature/p4-memory-agent` | Mémoire, Agentic RAG, MLOps/LLMOps, Notebooks |
