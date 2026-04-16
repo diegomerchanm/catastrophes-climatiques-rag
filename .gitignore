@@ -1,5 +1,6 @@
 .env
-faiss_store/
+# faiss_store/ est versionne (5 MB) pour garantir que le Docker image
+# et HF Spaces ont toujours le vector store pret a l'emploi.
 data/raw/
 __pycache__/
 *.pyc
