@@ -1,4 +1,11 @@
 ---
+title: SAEARCH
+emoji: 🌍
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 8000
+---
 
 # SAEARCH — Système Agentique d'Évaluation et d'Anticipation des Risques Climatiques et Hydrologiques
 
