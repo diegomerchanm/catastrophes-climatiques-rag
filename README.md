@@ -371,7 +371,11 @@ catastrophes-climatiques-rag/
 
 | Notebook | Contenu | Phase |
 |---|---|---|
-| 01-03 | Exploration corpus, tests RAG, tests agents | P1/P2/P3 |
+| 01_exploration_corpus | Exploration du corpus scientifique (10 PDFs) | P1 |
+| 01_rag_pipeline_metriques | Pipeline RAG : ingestion, embeddings FAISS, retriever MMR | P1 |
+| 02_test_rag | Tests RAG : questions/réponses sur le corpus | P1/P2 |
+| 02_integration_demo | Démo d'intégration RAG + agents | P2/P3 |
+| 03_test_agents | Tests agents : météo, web, calcul | P2 |
 | NB4 | Mémoire conversationnelle + multilingue FR/EN/ES | P4 |
 | NB5 | Analyse de risque prédictive (passé/présent/futur + multi-villes) | P4 |
 | NB6 | Comparatifs MLflow (pondérations, températures, A/B prompts) | P4 |
