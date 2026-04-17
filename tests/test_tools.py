@@ -2,10 +2,10 @@
 
 
 def test_all_tools_list():
-    """Vérifie que ALL_TOOLS contient les 13 outils."""
+    """Vérifie que ALL_TOOLS contient 14 entrées (13 outils métier + cancel_scheduled_emails)."""
     from src.agents.tools import ALL_TOOLS
 
-    assert len(ALL_TOOLS) == 13, f"Nombre d'outils inattendu : {len(ALL_TOOLS)}"
+    assert len(ALL_TOOLS) == 14, f"Nombre d'outils inattendu : {len(ALL_TOOLS)}"
 
 
 def test_tool_names():
