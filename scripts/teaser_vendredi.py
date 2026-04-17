@@ -35,7 +35,7 @@ def charger_destinataires() -> list[tuple[str, str]]:
     if not raw:
         logger.error(
             "TEASER_RECIPIENTS_JSON absent. Renseigner cette variable "
-            "avec un JSON {\"Nom Prenom\": \"email@domaine\", ...}."
+            'avec un JSON {"Nom Prenom": "email@domaine", ...}.'
         )
         return []
     try:
@@ -45,11 +45,13 @@ def charger_destinataires() -> list[tuple[str, str]]:
         logger.error("TEASER_RECIPIENTS_JSON invalide : %s", exc)
         return []
 
+
 SUJET = "🌍 DU SDA7 : Aperçu du projet GENERATIVE AI avant soutenance - ANNONCE : Ouverture de SAEARCH"
 
 DEMO_URL = "https://xbizot-saearch.hf.space"
 # Le mot de passe n'est PAS stocke ici : le teaser le donne en indice
 # ("nom du projet en minuscule") pour que les destinataires le devinent.
+
 
 def charger_signature() -> str:
     """Charge la signature equipe depuis TEASER_SIGNATURE (env var).
@@ -73,6 +75,7 @@ def revue_de_presse() -> str:
             _sys.path.insert(0, str(racine))
         try:
             from dotenv import load_dotenv as _ld
+
             _ld(racine / ".env")
         except Exception:
             pass
@@ -80,13 +83,17 @@ def revue_de_presse() -> str:
         from src.agents.tools import web_search
 
         # Mix climat + environnement + solutions (pas que catastrophes)
-        resultat = web_search.invoke({
-            "query": "climat environnement actualites solutions avril 2026",
-            "max_results": 5,
-        })
+        resultat = web_search.invoke(
+            {
+                "query": "climat environnement actualites solutions avril 2026",
+                "max_results": 5,
+            }
+        )
         if resultat and len(resultat) > 120:
             return intro + resultat
-        logger.warning("Tavily resultat trop court : %d car", len(resultat) if resultat else 0)
+        logger.warning(
+            "Tavily resultat trop court : %d car", len(resultat) if resultat else 0
+        )
     except Exception as exc:
         logger.error("Revue de presse Tavily echouee : %s", exc)
     return intro
@@ -144,10 +151,7 @@ def donut_svg(size: int = 260) -> str:
     )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
-        f'viewBox="0 0 {size} {size}">'
-        + "".join(arcs)
-        + center
-        + "</svg>"
+        f'viewBox="0 0 {size} {size}">' + "".join(arcs) + center + "</svg>"
     )
 
 
@@ -170,7 +174,16 @@ def donut_png_bytes() -> bytes:
         startangle=90,
         wedgeprops={"width": 0.35, "edgecolor": "white", "linewidth": 1.5},
     )
-    ax.text(0, 0, "SAEARCH", ha="center", va="center", fontsize=13, fontweight="bold", color="#6b7280")
+    ax.text(
+        0,
+        0,
+        "SAEARCH",
+        ha="center",
+        va="center",
+        fontsize=13,
+        fontweight="bold",
+        color="#6b7280",
+    )
     ax.set_aspect("equal")
     plt.tight_layout(pad=0)
 
@@ -251,7 +264,10 @@ Vos credentials sont privés :<br>
 
 
 def envoyer_un(
-    email_expediteur: str, password_app: str, nom: str, email: str,
+    email_expediteur: str,
+    password_app: str,
+    nom: str,
+    email: str,
     donut_data: bytes = None,
 ) -> bool:
     """Envoie un mail personnalise a un destinataire. Retourne True si OK."""
