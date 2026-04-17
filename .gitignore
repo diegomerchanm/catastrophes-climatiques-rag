@@ -25,3 +25,11 @@ scheduler_jobs.db
 # BAT teaser (apercu local, pas d'interet sur le repo)
 outputs/teaser_preview.html
 outputs/teaser_preview.txt
+
+# Logs de generation PDF (mdpdf, etc.)
+mdpdf.log
+*.log
+
+# Diagramme architecture HTML (regenere via Claude Web, non versionne tant qu'il
+# n'est pas finalise et coherent avec la doc)
+SAEARCH_architecture.html

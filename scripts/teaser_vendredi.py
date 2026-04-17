@@ -45,11 +45,11 @@ def charger_destinataires() -> list[tuple[str, str]]:
         logger.error("TEASER_RECIPIENTS_JSON invalide : %s", exc)
         return []
 
-SUJET = "🌍 SAEARCH — Aperçu du projet GENERATIVE AI DU SDA7 avant soutenance"
+SUJET = "🌍 DU SDA7 : Aperçu du projet GENERATIVE AI avant soutenance - ANNONCE : Ouverture de SAEARCH"
 
 DEMO_URL = "https://xbizot-saearch.hf.space"
 # Le mot de passe n'est PAS stocke ici : le teaser le donne en indice
-# ("nom du programme en minuscule") pour que les destinataires le devinent.
+# ("nom du projet en minuscule") pour que les destinataires le devinent.
 
 def charger_signature() -> str:
     """Charge la signature equipe depuis TEASER_SIGNATURE (env var).
@@ -57,18 +57,12 @@ def charger_signature() -> str:
     return os.getenv("TEASER_SIGNATURE", "L'équipe SAEARCH").strip()
 
 
-def revue_de_presse(max_results: int = 5) -> str:
-    """Récupère une mini revue de presse climatique via l'outil web_search.
-    Charge .env pour avoir TAVILY_API_KEY avant l'appel. En dernier recours,
-    retourne un resume neutre plutot qu'un message d'indisponibilite.
-    """
-    placeholder = (
-        "Tour d'horizon climatique cette semaine : les rapports GIEC AR6 "
-        "et Copernicus continuent d'alerter sur l'intensification des "
-        "precipitations extremes en Mediterranee et la multiplication "
-        "des vagues de chaleur printanieres en Europe de l'Ouest. "
-        "Les dispositifs d'alerte europeens (Floods Directive) sont "
-        "reactives en amont de la saison 2026."
+def revue_de_presse() -> str:
+    """Tavily parse les titres, premieres lignes et liens. Point."""
+    intro = (
+        "📢 Platform SAEARCH is opening and ready to DOO MAX for the planet.\n\n"
+        "La veille climatique est générée automatiquement chaque semaine "
+        "par notre newsletter SAEARCH via l'outil Tavily.\n\n"
     )
     try:
         import sys as _sys
@@ -77,36 +71,30 @@ def revue_de_presse(max_results: int = 5) -> str:
         racine = _Path(__file__).resolve().parent.parent
         if str(racine) not in _sys.path:
             _sys.path.insert(0, str(racine))
-
-        # Charger .env pour Tavily / Anthropic si presents
         try:
-            from dotenv import load_dotenv as _load_env
-
-            _load_env(racine / ".env")
+            from dotenv import load_dotenv as _ld
+            _ld(racine / ".env")
         except Exception:
             pass
 
-        from src.agents.tools import web_search  # type: ignore
+        from src.agents.tools import web_search
 
-        # Revue de presse internationale avec une touche climat / catastrophes
-        # comme le fait DooMax : grands titres monde + focus climat de la semaine
-        requetes = [
-            "revue de presse internationale actualites monde climat catastrophes cette semaine",
-            "grands titres mondiaux geopolitique societe climat catastrophes naturelles",
-            "world news headlines climate disasters this week",
-        ]
-        for q in requetes:
-            resultat = web_search.invoke({"query": q, "max_results": max_results})
-            if resultat and "aucun resultat" not in resultat.lower() and len(resultat) > 120:
-                return resultat
-        return placeholder
+        # Mix climat + environnement + solutions (pas que catastrophes)
+        resultat = web_search.invoke({
+            "query": "climat environnement actualites solutions avril 2026",
+            "max_results": 5,
+        })
+        if resultat and len(resultat) > 120:
+            return intro + resultat
+        logger.warning("Tavily resultat trop court : %d car", len(resultat) if resultat else 0)
     except Exception as exc:
-        logger.warning("Revue de presse indisponible : %s", exc)
-        return placeholder
+        logger.error("Revue de presse Tavily echouee : %s", exc)
+    return intro
 
 
-# ── Donut DooMax : clin d'œil visuel, 9 outils tous actifs ─────────────
+# ── Donut SAEARCH : clin d'œil visuel, 9 catégories ────────────────────
 #    (mêmes couleurs que src/ui/donut_chart.py pour cohérence visuelle)
+#    Génération PNG via matplotlib pour compatibilité Gmail (SVG strippé).
 DONUT_CATEGORIES = [
     ("RAG", "#2563eb"),
     ("Météo", "#facc15"),
@@ -163,79 +151,130 @@ def donut_svg(size: int = 260) -> str:
     )
 
 
+def donut_png_bytes() -> bytes:
+    """Génère le donut en PNG (bytes) via matplotlib — compatible Gmail."""
+    import io
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    labels = [cat for cat, _ in DONUT_CATEGORIES]
+    colors = [color for _, color in DONUT_CATEGORIES]
+    sizes = [1] * len(DONUT_CATEGORIES)
+
+    fig, ax = plt.subplots(figsize=(3, 3), dpi=150)
+    wedges, _ = ax.pie(
+        sizes,
+        colors=colors,
+        startangle=90,
+        wedgeprops={"width": 0.35, "edgecolor": "white", "linewidth": 1.5},
+    )
+    ax.text(0, 0, "SAEARCH", ha="center", va="center", fontsize=13, fontweight="bold", color="#6b7280")
+    ax.set_aspect("equal")
+    plt.tight_layout(pad=0)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", transparent=True, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
+
 def construire_corps(nom_destinataire: str, email_destinataire: str) -> str:
     """Rend le corps personnalisé pour un destinataire (texte brut)."""
     return f"""Bonjour {nom_destinataire},
 
-Notre équipe vous partage un aperçu de notre projet : SAEARCH — Système Agentique d'Évaluation et d'Anticipation des Risques Climatiques et Hydrologiques.
+Notre équipe vous annonce l'ouverture de la plateforme SAEARCH — Système Agentique d'Évaluation et d'Anticipation des Risques Climatiques et Hydrologiques.
 
-SAEARCH sera capable de :
+SAEARCH vous permet de :
 
-  • Interroger un corpus scientifique multisources pour des analyses passées, actuelles et prédictives
   • Croiser météo temps réel, historique et prévisions à 7 jours
+  • Interroger un corpus scientifique multisources pour des analyses passées, actuelles et prédictives
   • Aider à la décision via 4 profils : événementiel, assurance, autorité publique, tourisme
 
-Démo en ligne : {DEMO_URL}
+Découverte en ligne : {DEMO_URL}
 Vos credentials sont privés :
   User     : votre adresse gmail.com
-  Password : nom du programme en minuscule
+  Password : nom du projet en minuscule
+
+  Vous ferez connaissance avec notre mascotte.
 
 ----------------------------------------------------------------
-Revue de presse (aperçu du job hebdomadaire SAEARCH)
+Revue de presse (aperçu de la newsletter hebdomadaire SAEARCH)
 ----------------------------------------------------------------
 {revue_de_presse()}
 ----------------------------------------------------------------
 
-Soutenance : vendredi 17 avril 2026 à 20:42 — au plaisir de vous présenter cela en détail.
+Soutenance : vendredi 17 avril 2026 à 20:42 — au plaisir de vous présenter le projet en détail.
 
 {charger_signature()}
+
+L'envoi de cet email a été programmé via l'outil Scheduler de SAEARCH.
 """
 
 
 def construire_corps_html(nom_destinataire: str, email_destinataire: str) -> str:
     """Rend une version HTML lisible (bullet points, gras, lien cliquable)."""
-    svg = donut_svg(260)
     return f"""<html><body style="font-family:Arial,sans-serif;line-height:1.6;color:#1f2937;">
 <p>Bonjour <b>{nom_destinataire}</b>,</p>
 
-<p>Notre équipe vous partage un aperçu de notre projet : <b>SAEARCH</b> — <i>Système Agentique d'Évaluation et d'Anticipation des Risques Climatiques et Hydrologiques</i>.</p>
+<p>Notre équipe vous annonce l'ouverture de la plateforme <b>SAEARCH</b> — <i>Système Agentique d'Évaluation et d'Anticipation des Risques Climatiques et Hydrologiques</i>.</p>
 
-<div style="text-align:center;margin:18px 0;">
-{svg}
+<div style="margin:18px 0;">
+<img src="cid:donut" alt="SAEARCH donut" width="260">
 </div>
 
-<p><b>SAEARCH</b> sera capable de :</p>
+<p><b>SAEARCH</b> vous permet de :</p>
 <ul>
-  <li>Interroger un corpus scientifique multisources pour des analyses passées, actuelles et prédictives</li>
   <li>Croiser météo temps réel, historique et prévisions à 7 jours</li>
+  <li>Interroger un corpus scientifique multisources pour des analyses passées, actuelles et prédictives</li>
   <li>Aider à la décision via 4 profils : événementiel, assurance, autorité publique, tourisme</li>
 </ul>
 
-<p><b>Démo en ligne :</b> <a href="{DEMO_URL}">{DEMO_URL}</a><br>
+<p><b>Découverte en ligne :</b> <a href="{DEMO_URL}">{DEMO_URL}</a><br>
 Vos credentials sont privés :<br>
 &nbsp;&nbsp;User : votre adresse gmail.com<br>
-&nbsp;&nbsp;Password : nom du programme en minuscule</p>
+&nbsp;&nbsp;Password : nom du projet en minuscule</p>
+<p>Vous ferez connaissance avec notre mascotte.</p>
 
 <div style="margin-top:24px;padding:14px 18px;background:#f9fafb;border-left:3px solid #2563eb;border-radius:4px;">
-<p style="margin:0 0 8px 0;font-weight:bold;color:#1f2937;">📰 Revue de presse <span style="font-weight:normal;color:#6b7280;font-size:0.9em;">(aperçu du job hebdomadaire SAEARCH)</span></p>
+<p style="margin:0 0 12px 0;font-weight:bold;color:#1f2937;">📰 Revue de presse <span style="font-weight:normal;color:#6b7280;font-size:0.9em;">(aperçu de la newsletter hebdomadaire SAEARCH)</span></p>
 <pre style="margin:0;white-space:pre-wrap;font-family:Georgia,serif;font-size:0.92em;color:#374151;line-height:1.5;">{revue_de_presse()}</pre>
 </div>
 
-<p style="margin-top:22px;"><b>Soutenance :</b> vendredi 17 avril 2026 à 20:42 — au plaisir de vous présenter cela en détail.</p>
+<p style="margin-top:22px;"><b>Soutenance :</b> vendredi 17 avril 2026 à 20:42 — au plaisir de vous présenter le projet en détail.</p>
 
 <p style="color:#6b7280;font-size:0.95em;">{charger_signature()}</p>
+<p style="color:#9ca3af;font-size:0.8em;font-style:italic;margin-top:16px;">L'envoi de cet email a été programmé via l'outil Scheduler de SAEARCH.</p>
 </body></html>"""
 
 
-def envoyer_un(email_expediteur: str, password_app: str, nom: str, email: str) -> bool:
+def envoyer_un(
+    email_expediteur: str, password_app: str, nom: str, email: str,
+    donut_data: bytes = None,
+) -> bool:
     """Envoie un mail personnalise a un destinataire. Retourne True si OK."""
-    msg = MIMEMultipart("alternative")
+    from email.mime.image import MIMEImage
+
+    msg = MIMEMultipart("related")
+
+    # Partie alternative (texte brut + HTML)
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(construire_corps(nom, email), "plain", "utf-8"))
+    alt.attach(MIMEText(construire_corps_html(nom, email), "html", "utf-8"))
+    msg.attach(alt)
+
+    # Image donut inline (Content-ID)
+    if donut_data:
+        img = MIMEImage(donut_data, _subtype="png")
+        img.add_header("Content-ID", "<donut>")
+        img.add_header("Content-Disposition", "inline", filename="saearch_donut.png")
+        msg.attach(img)
+
     msg["From"] = email_expediteur
     msg["To"] = email
     msg["Subject"] = SUJET
-
-    msg.attach(MIMEText(construire_corps(nom, email), "plain", "utf-8"))
-    msg.attach(MIMEText(construire_corps_html(nom, email), "html", "utf-8"))
 
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
@@ -307,6 +346,15 @@ Sujet : <code>{SUJET}</code><br>
 
 
 def main() -> int:
+    # Charger .env pour avoir les credentials en local
+    try:
+        from pathlib import Path
+        from dotenv import load_dotenv
+
+        load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+    except Exception:
+        pass
+
     # Mode BAT : generer un apercu HTML sans envoyer
     if "--bat" in sys.argv or os.getenv("BAT") == "1":
         generer_bat()
@@ -327,11 +375,19 @@ def main() -> int:
         logger.error("Aucun destinataire valide — arret.")
         return 1
 
+    # Générer le donut PNG une seule fois (partagé entre tous les envois)
+    try:
+        donut_data = donut_png_bytes()
+        logger.info("Donut PNG genere (%d octets)", len(donut_data))
+    except Exception as exc:
+        logger.warning("Donut PNG indisponible : %s", exc)
+        donut_data = None
+
     logger.info("Envoi du teaser a %d destinataire(s)", len(destinataires))
     ok = 0
     ko = 0
     for nom, email in destinataires:
-        if envoyer_un(email_expediteur, password_app, nom, email):
+        if envoyer_un(email_expediteur, password_app, nom, email, donut_data):
             ok += 1
         else:
             ko += 1

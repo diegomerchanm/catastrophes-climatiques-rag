@@ -33,8 +33,11 @@ Il est capable de :
 - Fournir une **aide à la décision humaine** via 4 profils : événementiel, assurance, autorité publique, tourisme — avec boucle **Human-in-the-Loop** (approuver / enrichir / rejeter + log MLflow)
 - Envoyer des **emails d'alerte** (immédiats, bulk, ou programmés via APScheduler persistant)
 - S'**intégrer dans tout client MCP** (Claude Desktop, Cursor, Claude Code) via un serveur FastMCP exposant 11 outils
-- Implémentation STT PCM 16 de l'acquisition des inputs par la voix
+- Implémentation STT PCM16 + autodétection de langue pour l'acquisition vocale (Faster-Whisper local)
+- Lecture vocale des réponses (TTS) via la Web Speech API du navigateur — bouton flottant 🔊
 - Upload multimodal : PDF/DOCX session-scoped (indexation FAISS in-memory), images via Claude vision, audio via Faster-Whisper
+- Géolocalisation utilisateur (GPS natif si autorisé, IP en fallback) réinjectée dans le prompt système
+- Sortie décisionnelle auto-explicative grâce au **guide de lecture** intégré (légende DECISION / HORIZON / SCORE / RISQUE / CONFIANCE)
 
 ---
 
@@ -45,7 +48,7 @@ Il est capable de :
 | **Repo GitHub** (public) | https://github.com/diegomerchanm/catastrophes-climatiques-rag |
 | **Image Docker Hub** (publique, pull direct) | https://hub.docker.com/r/xbizot/rag-catastrophes |
 | **Déploiement cloud** (HF Spaces, live) | https://xbizot-saearch.hf.space |
-| **Déploiement AWS App Runner** | Configuré, en attente d'activation du compte (délai AWS jusqu'à 24h) |
+| **Image AWS ECR** (artefact, eu-west-3) | `310971189093.dkr.ecr.eu-west-3.amazonaws.com/saearch:latest` |
 
 ```bash
 # Pull direct de l'image Docker
@@ -61,14 +64,14 @@ Compte démo : `demo@saearch.ai` / `demo`
 | Composant | Technologie |
 |---|---|
 | **Langage** | Python 3.11 |
-| **LLM** | Anthropic Claude — fallback quadruple : Opus 4.6 → Sonnet 4.5 → Haiku 4.5 → Ollama local |
+| **LLM** | Anthropic Claude — fallback 3 niveaux : Sonnet 4 (principal) → Haiku 4.5 → Ollama Mistral local |
 | **Framework agent** | LangChain + LangGraph (boucle ReAct) |
 | **RAG** | FAISS + BM25 hybride (EnsembleRetriever) |
 | **Embeddings** | HuggingFace `paraphrase-multilingual-MiniLM-L12-v2` (multilingue 50+ langues, local) |
 | **Reranking** | CrossEncoder MS-MARCO, placement stratégique (Lost in the Middle) |
 | **Bridge lexical** | FR→EN (GIEC↔IPCC, OMM↔WMO, 20 termes), diversité forcée max 3 chunks/PDF |
 | **Retrieval** | MMR k=12, lambda_mult=0.7, avec citations page + source |
-| **UI** | Chainlit (streaming, STT PCM16, upload PDF/DOCX/image, auth, traduction native 25 langues) |
+| **UI** | Chainlit (streaming, STT PCM16 + autodétection langue, TTS bouton flottant Web Speech API, upload PDF/DOCX/image, auth, traduction native 25 langues, géoloc native + IP fallback) |
 | **API météo** | OpenMeteo (gratuit, sans clé) |
 | **Recherche web** | Tavily (priorité) + DuckDuckGo (fallback) |
 | **ML prédictif** | Gradient Boosting Quantile Regression (median) + classification multi-classe (scikit-learn + XGBoost) |
@@ -138,14 +141,12 @@ Le serveur peut être consommé par :
 - Claude Code (stdio local)
 - Cursor, Continue, tout client MCP standard
 
-### Fallback LLM quadruple
+### Fallback LLM (3 niveaux)
 
 ```
-Opus 4.6 (principal)
+Sonnet 4 (principal — orchestrateur agent)
     ↓ échec / rate-limit 429
-Sonnet 4.5 (fallback Anthropic)
-    ↓ échec
-Haiku 4.5 (fallback économique)
+Haiku 4.5 (fallback Anthropic économique)
     ↓ échec / panne API
 Ollama Mistral (fallback local, hors ligne, gratuit)
 ```
@@ -172,7 +173,7 @@ Résilience contre rate-limit 429, panne API, quota épuisé.
 - **Prompt versioning** : dict PROMPTS v1.0 et v2.0, tag MLflow `params.prompt_version` pour filtrer et comparer
 - **Cost monitoring** : estimation USD par requête, agrégation MLflow (profiling des questions coûteuses)
 - **Latency tracking** : metric `duree_s` par run, détection régressions
-- **Fallback LLM quadruple** : Opus → Sonnet → Haiku → Ollama local (résilience cloud)
+- **Fallback LLM 3 niveaux** : Sonnet 4 → Haiku 4.5 → Ollama local (résilience cloud)
 - **Tracing outils** : détection `tool_calls` via events LangGraph, log MLflow nb_outils / outils appelés
 - **Dashboard MLflow** : UI locale SQLite, comparaison runs par tag
 
@@ -347,7 +348,7 @@ catastrophes-climatiques-rag/
 - **Orchestration agentique 4 outils pour scoring multi-sources** : `calculer_score_risque` combine météo + ML + corpus GIEC + historique
 - **ML prédictif robuste aux outliers** : Quantile Regression + clipping, fix biais canicule France 2003
 - **Scheduler d'emails différés persistant** : `schedule_email` (13e outil), APScheduler + SQLite
-- **Fallback LLM quadruple** pour résilience cloud : Opus → Sonnet → Haiku → Ollama
+- **Fallback LLM 3 niveaux** pour résilience cloud : Sonnet → Haiku → Ollama
 - **MLflow Model Registry + observabilité LLMOps complète** : 1 run par requête Chainlit, unification backend tracking ML + LLM
 - **Upload PDF/DOCX/image session-scoped** : anti-pollution corpus, isolation par session
 - **Exposition MCP universelle** via FastMCP : 11 outils réutilisés sans duplication de code, démo live Claude Desktop
@@ -385,6 +386,23 @@ catastrophes-climatiques-rag/
 | NB10 | ML prédictif multi-type (Quantile Regression + classification) | P4 |
 
 Chaque notebook suit le format : Configuration → Analyse → Résultats → Conclusions (quality gate + hypothèse + limites + axes d'amélioration).
+
+---
+
+## Documentation détaillée
+
+L'intégralité de la documentation projet est dans le dossier [`docs/`](docs/) :
+
+| Document | Pour qui | Contenu |
+|---|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | Lecteur technique | Architecture détaillée brique par brique, alignée sur le code |
+| [`docs/decisions.md`](docs/decisions.md) | Lecteur technique | 25 ADR (Architecture Decision Records) — le *pourquoi* derrière chaque choix |
+| [`docs/architecture_pour_slides.md`](docs/architecture_pour_slides.md) | Soutenance | Version condensée : diagramme 1-slide, 3 phrases, chiffres clés, innovations |
+| [`docs/glossaire.md`](docs/glossaire.md) | Tout public | ~80 termes techniques expliqués en 1-2 phrases (RAG, MMR, BM25, HITL, MCP...) |
+| [`docs/demo_script.md`](docs/demo_script.md) | Soutenance | Script pas-à-pas : 10 séquences avec questions exactes à taper et plans B |
+| [`docs/faq.md`](docs/faq.md) | Soutenance | 18 questions probables du jury avec réponses préparées |
+| [`docs/archive/`](docs/archive/) | Traçabilité | Versions précédentes des docs (refonte du 17/04/2026) |
+| [`CLAUDE.md`](CLAUDE.md) | Assistants IA | Conventions de code, règles de sécurité, retex projet |
 
 ---
 
