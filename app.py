@@ -1656,7 +1656,11 @@ try:
             model = WhisperModel("small", device="cpu", compute_type="int8")
             # language=None → détection automatique (FR, EN, ES, DE, etc.)
             segments, info = model.transcribe(tmp_path, language=None)
-            logger.info("Langue detectee par Whisper : %s (proba %.0f%%)", info.language, info.language_probability * 100)
+            logger.info(
+                "Langue detectee par Whisper : %s (proba %.0f%%)",
+                info.language,
+                info.language_probability * 100,
+            )
             text = " ".join(segment.text for segment in segments)
 
             logger.info("Transcription : %s", text[:100])
