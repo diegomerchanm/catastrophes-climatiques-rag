@@ -164,7 +164,7 @@ async def on_chat_start():
     greeting = f"Bonjour <b>{user_name}</b>" if user else "Bonjour"
     donut_accueil = generer_message_avec_donut(
         answer=(
-            f"{greeting}, je suis <b>DooMax</b>, ton IA dans <b>SAEARCH</b>, "
+            f"{greeting}, je suis <b>DooMax</b>, votre IA dans <b>SAEARCH</b>, "
             "le Systeme Agentique d'Evaluation et d'Anticipation "
             "des Risques Climatiques et Hydrologiques.<br><br>"
             "Comment puis-je t'aider ?"
@@ -280,45 +280,33 @@ async def _run_decision_agent(prompt: str, route_label: str = "Agent") -> None:
     # Human-in-the-Loop : AskActionMessage rend des boutons modaux XXL,
     # impossibles a louper sur mobile (contrairement au Message+actions
     # qui rendait des pilules minuscules).
-    hitl_res = await cl.AskActionMessage(
+    # Human-in-the-Loop via message + actions classiques (pas AskActionMessage
+    # qui bloque le flux et laisse un spinner actif).
+    hitl_actions = [
+        cl.Action(
+            name="hitl_approve",
+            payload={"status": "approved"},
+            label="✅ J'approuve",
+        ),
+        cl.Action(
+            name="hitl_modify",
+            payload={"status": "modified"},
+            label="⚠️ Enrichir",
+        ),
+        cl.Action(
+            name="hitl_reject",
+            payload={"status": "rejected"},
+            label="❌ Rejeter",
+        ),
+    ]
+    await cl.Message(
         content=(
             "<b>🧑‍⚖️ L'IA propose, vous disposez.</b><br>"
             "Cette recommandation doit etre <b>validee par un humain</b> "
-            "avant toute action operationnelle. Choisissez une action :"
+            "avant toute action operationnelle."
         ),
-        actions=[
-            cl.Action(
-                name="hitl_choice",
-                payload={"status": "approved"},
-                label="✅ J'approuve",
-            ),
-            cl.Action(
-                name="hitl_choice",
-                payload={"status": "modified"},
-                label="⚠️ Enrichir",
-            ),
-            cl.Action(
-                name="hitl_choice",
-                payload={"status": "rejected"},
-                label="❌ Rejeter",
-            ),
-        ],
-        timeout=600,
+        actions=hitl_actions,
     ).send()
-
-    if not hitl_res:
-        return
-    status = (
-        hitl_res.get("payload", {}).get("status")
-        if isinstance(hitl_res, dict)
-        else None
-    )
-    if status == "approved":
-        await _hitl_apply_approved()
-    elif status == "modified":
-        await _hitl_apply_modified()
-    elif status == "rejected":
-        await _hitl_apply_rejected()
 
 
 # ── Callbacks Human-in-the-Loop ────────────────────────────────────────────
@@ -345,8 +333,10 @@ def _log_hitl_feedback(status: str, comment: str = "") -> None:
         logger.debug("HITL MLflow log impossible : %s", exc)
 
 
-async def _hitl_apply_approved() -> None:
-    """Traitement quand l'utilisateur clique Approuver (AskActionMessage)."""
+@cl.action_callback("hitl_approve")
+async def _hitl_apply_approved(action: cl.Action) -> None:
+    """Traitement quand l'utilisateur clique Approuver."""
+    await action.remove()
     _log_hitl_feedback("approved")
     await cl.Message(
         content=(
@@ -358,8 +348,10 @@ async def _hitl_apply_approved() -> None:
     ).send()
 
 
-async def _hitl_apply_modified() -> None:
-    """Traitement quand l'utilisateur clique Enrichir (AskActionMessage)."""
+@cl.action_callback("hitl_modify")
+async def _hitl_apply_modified(action: cl.Action) -> None:
+    """Traitement quand l'utilisateur clique Enrichir."""
+    await action.remove()
     res_contexte = await cl.AskUserMessage(
         content=(
             "⚠️ <b>Contexte supplementaire ?</b><br>"
@@ -384,8 +376,10 @@ async def _hitl_apply_modified() -> None:
     await _run_decision_agent(new_prompt, "Mode decisionnel — Revision enrichie")
 
 
-async def _hitl_apply_rejected() -> None:
-    """Traitement quand l'utilisateur clique Rejeter (AskActionMessage)."""
+@cl.action_callback("hitl_reject")
+async def _hitl_apply_rejected(action: cl.Action) -> None:
+    """Traitement quand l'utilisateur clique Rejeter."""
+    await action.remove()
     res_raison = await cl.AskUserMessage(
         content=(
             "❌ <b>Pourquoi rejetez-vous cette recommandation ?</b><br>"
@@ -418,15 +412,17 @@ def _prompt_decisionnel_event(lieu: str, date: str, type_evt: str) -> str:
         f"1. Appelle get_forecast({lieu}) pour les previsions meteo\n"
         f"2. Appelle search_corpus pour verifier les seuils de risque saison\n"
         f"3. Appelle calculer_score_risque avec les 4 sources\n\n"
-        f"FORMAT DE REPONSE STRICT (chaque champ sur sa ligne, aide utilisateur en italique sur la ligne suivante) :\n"
+        f"FORMAT DE REPONSE STRICT :\n"
+        f"Commence OBLIGATOIREMENT par ce bloc de legende (copie-le tel quel) :\n"
+        f"---\n"
+        f"**Guide de lecture** : DECISION = verdict operationnel | HORIZON = fenetre temporelle qui determine la ponderation des sources (court_terme : meteo 50%, standard : equilibre, long_terme : ML+corpus 80%) | SCORE = indice de risque 0-1 (0 = aucun danger, 1 = danger maximum) | RISQUE = traduction qualitative du score | CONFIANCE = qualite des sources\n"
+        f"---\n\n"
+        f"Puis enchaine avec les champs suivants :\n"
         f"**DECISION** : [GO / VIGILANCE / NO-GO]\n"
-        f"*→ verdict operationnel : maintenir, surveiller ou annuler l'evenement*\n"
-        f"**SCORE** : [0.00-1.00]\n"
-        f"*→ score composite agregeant meteo / ML / corpus / historique*\n"
-        f"**NIVEAU** : [TRES FAIBLE / FAIBLE / MODERE / ELEVE / CRITIQUE]\n"
-        f"*→ traduction qualitative du score pour lecture rapide*\n"
+        f"**HORIZON** : [COURT TERME / STANDARD / LONG TERME] + ponderation appliquee\n"
+        f"**SCORE DE RISQUE** : [0.00-1.00] (0 = aucun danger, 1 = danger maximum)\n"
+        f"**RISQUE** : [TRES FAIBLE / FAIBLE / MODERE / ELEVE / CRITIQUE]\n"
         f"**CONFIANCE** : [ELEVEE / MOYENNE / FAIBLE]\n"
-        f"*→ qualite et fraicheur des sources : bas si donnees manquantes ou anciennes*\n"
         f"**JUSTIFICATION** : 3 lignes maximum\n"
         f"**RECOMMANDATIONS** : 3 bullets concrets\n"
         f"**SOURCES** : [Source: fichier.pdf, Page: X]\n\n"
@@ -446,13 +442,15 @@ def _prompt_decisionnel_insurance(lieu: str, date_evt: str, type_sinistre: str) 
         f"2. get_historical_weather({lieu}, {date_evt}) pour conditions reelles\n"
         f"3. web_search : articles presse pour alertes officielles emises\n"
         f"4. Conclure si le sinistre etait PREVISIBLE ou non\n\n"
-        f"FORMAT DE REPONSE STRICT (chaque champ sur sa ligne, aide utilisateur en italique sur la ligne suivante) :\n"
+        f"FORMAT DE REPONSE STRICT :\n"
+        f"Commence OBLIGATOIREMENT par ce bloc de legende (copie-le tel quel) :\n"
+        f"---\n"
+        f"**Guide de lecture** : DECISION = previsibilite du sinistre | CERTITUDE = force du faisceau de preuves | CONFIANCE = qualite des sources\n"
+        f"---\n\n"
+        f"Puis enchaine avec les champs suivants :\n"
         f"**DECISION** : [PREVISIBLE / PARTIELLEMENT PREVISIBLE / NON PREVISIBLE]\n"
-        f"*→ caractere evitable du sinistre a la date des faits*\n"
         f"**NIVEAU DE CERTITUDE** : [FAIBLE / MOYEN / ELEVE]\n"
-        f"*→ force du faisceau de preuves disponibles (alertes, seuils, presse)*\n"
         f"**CONFIANCE** : [ELEVEE / MOYENNE / FAIBLE]\n"
-        f"*→ qualite et fraicheur des sources : bas si donnees manquantes ou anciennes*\n"
         f"**PREUVES CLES** : 3-5 bullets sources\n"
         f"**IMPLICATIONS JURIDIQUES** : 2 lignes max (pas de conseil juridique)\n"
         f"**SOURCES** : [Source: fichier.pdf, Page: X] pour chaque preuve\n\n"
@@ -472,15 +470,18 @@ def _prompt_decisionnel_public(lieu: str, type_decision: str) -> str:
         f"2. search_corpus : seuils critiques de la region\n"
         f"3. predict_risk({lieu}) ou predict_risk_by_type\n"
         f"4. calculer_score_risque : agregation 4 sources\n\n"
-        f"FORMAT DE REPONSE STRICT (chaque champ sur sa ligne, aide utilisateur en italique sur la ligne suivante) :\n"
+        f"FORMAT DE REPONSE STRICT :\n"
+        f"Commence OBLIGATOIREMENT par ce bloc de legende (copie-le tel quel) :\n"
+        f"---\n"
+        f"**Guide de lecture** : RECOMMANDATION = action preconisee | HORIZON = ponderation temporelle des sources | SCORE = indice de risque 0-1 (0 = aucun danger, 1 = danger maximum) | RISQUE = traduction qualitative | URGENCE = fenetre d'action | CONFIANCE = qualite des sources\n"
+        f"---\n\n"
+        f"Puis enchaine avec les champs suivants :\n"
         f"**RECOMMANDATION** : [DECLENCHEMENT / VIGILANCE / STANDBY]\n"
-        f"*→ action preconisee : declencher le dispositif, renforcer la veille ou maintenir le niveau actuel*\n"
-        f"**SCORE** : [0.00-1.00]\n"
-        f"*→ score composite agregeant meteo / ML / corpus / historique*\n"
+        f"**HORIZON** : [COURT TERME / STANDARD / LONG TERME] + ponderation appliquee\n"
+        f"**SCORE DE RISQUE** : [0.00-1.00] (0 = aucun danger, 1 = danger maximum)\n"
+        f"**RISQUE** : [TRES FAIBLE / FAIBLE / MODERE / ELEVE / CRITIQUE]\n"
         f"**URGENCE** : [IMMEDIATE / 24-48H / 7 JOURS / ROUTINE]\n"
-        f"*→ fenetre temporelle d'action recommandee*\n"
         f"**CONFIANCE** : [ELEVEE / MOYENNE / FAIBLE]\n"
-        f"*→ qualite et fraicheur des sources : bas si donnees manquantes ou anciennes*\n"
         f"**JUSTIFICATION CHIFFREE** : metriques precises\n"
         f"**MESURES CONCRETES** : 3-5 bullets operationnels\n"
         f"**SOURCES** : [Source: fichier.pdf, Page: X]\n\n"
@@ -510,20 +511,21 @@ def _prompt_decisionnel_tourist(
         f"REGLES STRICTES DE FORMAT :\n"
         f"- Tu commences DIRECTEMENT par **RECOMMANDATION** (pas de bandeau, "
         f"pas d'introduction narrative, pas de 'ATTENTION', pas de preambule).\n"
-        f"- Si tu detectes une incoherence (ex : destination inadaptee a l'activite), "
+        f"- Si vous detectez une incoherence (ex : destination inadaptee a l'activite), "
         f"mets la remarque UNIQUEMENT dans le champ **CONSEILS PRATIQUES** (premier bullet).\n"
         f"- Respecte exactement les 7 champs ci-dessous, dans cet ordre, sans rien "
         f"ajouter avant ni apres.\n\n"
-        f"FORMAT DE REPONSE STRICT (7 champs, commence directement par le premier, "
-        f"ajoute une ligne d'aide en italique sous chaque champ technique) :\n"
+        f"FORMAT DE REPONSE STRICT (7 champs, commence directement par le premier) :\n"
+        f"Commence OBLIGATOIREMENT par ce bloc de legende (copie-le tel quel) :\n"
+        f"---\n"
+        f"**Guide de lecture** : RECOMMANDATION = conseil sejour | HORIZON = ponderation temporelle (court_terme pour sejour <=7j, standard sinon) | SCORE = indice de risque 0-1 (0 = aucun danger, 1 = danger maximum) | RISQUE = traduction qualitative | CONFIANCE = qualite des sources\n"
+        f"---\n\n"
+        f"Puis enchaine avec les champs suivants :\n"
         f"**RECOMMANDATION** : [PARTEZ TRANQUILLE / VIGILANCE / REPORTEZ LE SEJOUR]\n"
-        f"*→ conseil global pour votre sejour*\n"
-        f"**SCORE** : [0.00-1.00]\n"
-        f"*→ score composite agregeant meteo / ML / corpus / historique*\n"
-        f"**NIVEAU** : [TRES FAIBLE / FAIBLE / MODERE / ELEVE / CRITIQUE]\n"
-        f"*→ traduction qualitative du score pour lecture rapide*\n"
+        f"**HORIZON** : [COURT TERME / STANDARD] + ponderation appliquee\n"
+        f"**SCORE DE RISQUE** : [0.00-1.00] (0 = aucun danger, 1 = danger maximum)\n"
+        f"**RISQUE** : [TRES FAIBLE / FAIBLE / MODERE / ELEVE / CRITIQUE]\n"
         f"**CONFIANCE** : [ELEVEE / MOYENNE / FAIBLE]\n"
-        f"*→ qualite et fraicheur des sources : bas si donnees manquantes ou anciennes*\n"
         f"**CONSEILS PRATIQUES** : 3-5 bullets concrets adaptes au touriste "
         f"(materiel a prevoir, activites a privilegier/eviter, numeros d'urgence locaux, "
         f"assurance voyage conseillee, points de repli en cas d'alerte). "
@@ -1274,7 +1276,7 @@ async def _handle_corpus_inventory(msg, question: str) -> tuple[str, list]:
             (
                 "system",
                 "Tu es DooMax, l'IA du systeme SAEARCH. "
-                "Voici l'integralite des {nb_docs} documents de ton corpus. "
+                "Voici l'integralite des {nb_docs} documents de votre corpus. "
                 "Resume chacun en 1-2 phrases. "
                 "Cite la source [Source: fichier, Page: 1] pour chaque document.\n\n"
                 "Documents :\n{context}",
@@ -1652,7 +1654,9 @@ try:
                 tmp_path = tmp.name
 
             model = WhisperModel("small", device="cpu", compute_type="int8")
-            segments, _ = model.transcribe(tmp_path, language="fr")
+            # language=None → détection automatique (FR, EN, ES, DE, etc.)
+            segments, info = model.transcribe(tmp_path, language=None)
+            logger.info("Langue detectee par Whisper : %s (proba %.0f%%)", info.language, info.language_probability * 100)
             text = " ".join(segment.text for segment in segments)
 
             logger.info("Transcription : %s", text[:100])

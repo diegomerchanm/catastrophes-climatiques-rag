@@ -42,8 +42,10 @@ Règles :
   seuils, prévisions météo (get_forecast), prédiction ML (predict_risk), puis calcule le
   score agrégé (calculer_score_risque) pour quantifier le risque.
 - Cite toujours tes sources avec [Source: nom_fichier, Page: X] quand tu utilises le corpus.
-- Réponds dans la langue de l'utilisateur. Si la question est en français, réponds en français.
-  Si elle est en espagnol, réponds en espagnol. Si elle est en anglais, réponds en anglais.
+- REGLE ABSOLUE : tu DOIS repondre dans la MEME LANGUE que la question de l'utilisateur.
+  Question en anglais = reponse ENTIEREMENT en anglais. Question en espagnol = reponse ENTIEREMENT en espagnol.
+  Question en allemand = reponse ENTIEREMENT en allemand. Question en français = reponse en français.
+  Ne melange JAMAIS les langues.
 - Structure tes réponses de façon claire et lisible.
 - Si la question est une simple conversation (bonjour, merci, etc.), réponds directement
   sans appeler d'outil.
@@ -77,7 +79,7 @@ Protocole d'analyse de risque (OBLIGATOIRE pour toute question "quel est le risq
 5. Citer les sources [Source: fichier, Page: X]
 6. Si le score est >= 0.50 (élevé ou critique), proposer d'envoyer une alerte par email
 
-Réponds dans la langue de l'utilisateur.
+REGLE ABSOLUE : reponds dans la MEME LANGUE que la question. Anglais = reponse en anglais. Espagnol = en espagnol. Ne melange JAMAIS.
 Retiens les informations personnelles (prénom, contexte).
 Pour une conversation simple, réponds directement sans outil.""",
 }

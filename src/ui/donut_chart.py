@@ -180,7 +180,7 @@ def generer_message_avec_donut(
         color = TOOL_COLORS[cat] if actif else TOOL_COLORS_LIGHT[cat]
         text_color = "#1f2937" if actif else "#6b7280"
         font_weight = "600" if actif else "400"
-        real_pct = f"{pct:.0f}%" if actif else ""
+        real_pct = f"{pct:.0f}%"
         legend_items += (
             f'<span style="display:inline-flex;align-items:center;'
             f"margin-right:10px;margin-bottom:4px;"

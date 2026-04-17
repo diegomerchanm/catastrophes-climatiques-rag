@@ -761,6 +761,37 @@ def schedule_email(
     )
 
 
+@tool
+def cancel_scheduled_emails() -> str:
+    """
+    Annule tous les emails programmes en attente dans le scheduler.
+    Utile si l'utilisateur a programme un email par erreur ou veut tout arreter.
+
+    Returns:
+        Nombre d'emails annules et confirmation.
+    """
+    logger.info("Appel cancel_scheduled_emails")
+    scheduler = _get_scheduler()
+    if scheduler is None:
+        return "Scheduler indisponible (APScheduler non installe)."
+
+    jobs = scheduler.get_jobs()
+    if not jobs:
+        return "Aucun email programme en attente."
+
+    nb = len(jobs)
+    details = []
+    for job in jobs:
+        details.append(f"  - {job.id} (prevu {job.next_run_time})")
+        job.remove()
+
+    return (
+        f"{nb} email(s) programme(s) annule(s) :\n"
+        + "\n".join(details)
+        + "\nTous les envois ont ete supprimes."
+    )
+
+
 # ══════════════════════════════════════════════════════════════════
 # OUTIL 8 — Prédiction ML du risque catastrophe (modèle EM-DAT multi-type)
 # ══════════════════════════════════════════════════════════════════
@@ -1246,6 +1277,7 @@ ALL_TOOLS = [
     send_email,
     send_bulk_email,
     schedule_email,
+    cancel_scheduled_emails,
     predict_risk,
     predict_risk_by_type,
     calculer_score_risque,
